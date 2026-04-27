@@ -3,60 +3,135 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>監視ツール</title>
+    <title>管理者専用・最強監視ツール</title>
     <style>
-        body { font-family: sans-serif; background: #f0f2f5; margin: 0; padding: 10px; }
-        .header { background: #1da1f2; color: white; padding: 15px; border-radius: 10px; margin-bottom: 15px; text-align: center; }
-        .account-section { background: white; margin-bottom: 20px; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        .account-id { font-weight: bold; font-size: 1.2em; color: #1da1f2; margin-bottom: 10px; display: block; }
-        .timeline-btn { display: inline-block; background: #1da1f2; color: white; padding: 8px 15px; text-decoration: none; border-radius: 20px; font-size: 0.9em; margin-bottom: 10px; }
+        body { font-family: -apple-system, sans-serif; margin: 0; background: #15202b; color: white; }
+        .nav { position: sticky; top: 0; background: #1da1f2; display: flex; justify-content: space-around; padding: 12px; z-index: 1000; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+        .nav-item { cursor: pointer; font-weight: bold; font-size: 14px; padding: 5px 15px; border-radius: 20px; }
+        .nav-item.active { background: white; color: #1da1f2; }
+        .container { max-width: 600px; margin: auto; padding: 10px; padding-bottom: 80px; }
+        .card { background: #192734; margin-bottom: 20px; border-radius: 15px; overflow: hidden; border: 1px solid #38444d; position: relative; }
+        .account-info { padding: 10px; font-weight: bold; border-bottom: 1px solid #38444d; display: flex; justify-content: space-between; align-items: center; }
+        .action-area { padding: 12px; background: #22303c; text-align: center; }
+        .btn { border: none; padding: 10px 20px; border-radius: 25px; font-weight: bold; cursor: pointer; width: 100%; font-size: 15px; transition: 0.2s; }
+        .add-btn { background: #e0245e; color: white; }
+        .del-btn { background: #657786; color: white; }
+        .btn:active { transform: scale(0.95); opacity: 0.8; }
+        .report-item { padding: 15px; border-bottom: 1px solid #38444d; word-break: break-all; }
+        .empty-msg { text-align: center; padding: 50px; color: #8899a6; }
     </style>
 </head>
 <body>
 
-<div class="header">
-    <h2>監視アカウント一覧</h2>
+<div class="nav">
+    <div id="nav-watch" class="nav-item active" onclick="showPage('watch')">監視ツール</div>
+    <div id="nav-manage" class="nav-item" onclick="showPage('manage')">通報リスト管理</div>
 </div>
 
-<div id="container">読み込み中...</div>
+<div id="watchPage" class="container">
+    <div id="watchList">読み込み中...</div>
+</div>
+
+<div id="managePage" class="container" style="display:none;">
+    <h3 style="padding: 10px;">現在の通報リスト</h3>
+    <div id="reportList"></div>
+</div>
 
 <script>
-    // あなたの新しいスプレッドシートID
+    const apiURL = 'https://script.google.com/macros/s/AKfycbwNMIqyjChPN5ckansj4zEcv-fEF9G6jnIOrdopZTCLOMMSRH5pZTEpS4U7-7-IJG2s/exec';
     const sheetId = '12dHiHr2XCXcJfnMTG7uADzZ3VB36fKRKGZRrj4nUXXw';
-    const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
 
-    async function loadAccounts() {
+    function showPage(page) {
+        document.getElementById('watchPage').style.display = page === 'watch' ? 'block' : 'none';
+        document.getElementById('managePage').style.display = page === 'manage' ? 'block' : 'none';
+        document.getElementById('nav-watch').classList.toggle('active', page === 'watch');
+        document.getElementById('nav-manage').classList.toggle('active', page === 'manage');
+        if(page === 'manage') loadReports();
+    }
+
+    // accountsシートからIDを読み取ってタイムラインを表示
+    async function loadWatch() {
         try {
-            const response = await fetch(csvUrl);
-            const data = await response.text();
-            // A列のIDを取得（1行目は見出しとして飛ばす）
-            const rows = data.split('\n').map(row => row.split(',')[0].trim()).filter(id => id && id !== 'URL' && id !== 'ID' && id !== 'アカウント');
-
-            const container = document.getElementById('container');
-            container.innerHTML = '';
-
-            rows.forEach(id => {
-                const section = document.createElement('div');
-                section.className = 'account-section';
-                section.innerHTML = `
-                    <span class="account-id">@${id}</span>
-                    <a href="https://x.com/${id}" target="_blank" class="timeline-btn">プロフィールを開く</a>
-                    <div class="tweet-embed">
-                        <a class="twitter-timeline" data-height="500" data-theme="light" href="https://twitter.com/${id}?ref_src=twsrc%5Etfw">読み込み中...</a>
+            const res = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`);
+            const text = await res.text();
+            const ids = text.split('\n').map(r => r.split(',')[0].trim()).filter(id => id && id !== 'ID' && id !== 'URL');
+            
+            const list = document.getElementById('watchList');
+            list.innerHTML = '';
+            
+            ids.forEach(id => {
+                const div = document.createElement('div');
+                div.className = 'card';
+                div.innerHTML = `
+                    <div class="account-info"><span>@${id}</span></div>
+                    <a class="twitter-timeline" data-height="500" data-theme="dark" href="https://twitter.com/${id}"></a>
+                    <div class="action-area">
+                        <button class="btn add-btn" onclick="sendAction('add', 'https://x.com/${id}')">これを「通報リスト」に追加</button>
                     </div>
                 `;
-                container.appendChild(section);
+                list.appendChild(div);
             });
-
-            const script = document.createElement('script');
-            script.src = "https://platform.twitter.com/widgets.js";
-            document.body.appendChild(script);
-
+            if(window.twttr) twttr.widgets.load();
         } catch (e) {
-            document.getElementById('container').innerHTML = '読み込みエラー。シートの設定を確認してください。';
+            document.getElementById('watchList').innerHTML = 'IDの読み込みに失敗しました。';
         }
     }
-    loadAccounts();
+
+    // reportsシートから現在のリストを取得
+    async function loadReports() {
+        const list = document.getElementById('reportList');
+        list.innerHTML = '<p style="text-align:center;">確認中...</p>';
+        try {
+            const res = await fetch(`${apiURL}?action=getReports`);
+            const urls = await res.json();
+            
+            if(urls.length === 0) {
+                list.innerHTML = '<div class="empty-msg">リストは空です</div>';
+                return;
+            }
+
+            list.innerHTML = '';
+            urls.forEach(url => {
+                const div = document.createElement('div');
+                div.className = 'card';
+                div.innerHTML = `
+                    <div class="report-item">${url}</div>
+                    <div class="action-area">
+                        <button class="btn del-btn" onclick="sendAction('delete', '${url}')">このリンクを削除</button>
+                    </div>
+                `;
+                list.appendChild(div);
+            });
+        } catch (e) {
+            list.innerHTML = '<p style="text-align:center;">取得できませんでした</p>';
+        }
+    }
+
+    // GASに命令を送る（追加・削除）
+    async function sendAction(type, url) {
+        const confirmMsg = type === 'add' ? '通報リストに追加しますか？' : 'リストから削除しますか？';
+        if(!confirm(confirmMsg)) return;
+
+        // 読み込み中表示
+        const btn = event.target;
+        const originalText = btn.innerText;
+        btn.innerText = '処理中...';
+        btn.disabled = true;
+
+        try {
+            await fetch(`${apiURL}?action=${type}&url=${url}`, { mode: 'no-cors' });
+            alert('完了しました！');
+            if(type === 'delete') loadReports();
+        } catch (e) {
+            alert('エラーが発生しました');
+        } finally {
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }
+    }
+
+    loadWatch();
 </script>
+<script async src="https://platform.twitter.com/widgets.js"></script>
 </body>
 </html>
