@@ -11,13 +11,12 @@
         .nav-item.active { background: white; color: #1da1f2; }
         .container { max-width: 500px; margin: auto; padding: 20px; }
         
-        .input-card { background: #192734; padding: 20px; border-radius: 15px; border: 1px solid #38444d; margin-bottom: 20px; }
+        .input-card { background: #192734; padding: 20px; border-radius: 15px; border: 1px solid #38444d; margin-bottom: 20px; margin-top: 10px; }
         input { width: 90%; padding: 12px; border-radius: 10px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 16px; margin-bottom: 15px; }
         
         .btn { border: none; padding: 15px; border-radius: 30px; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; transition: 0.2s; }
         .add-btn { background: #1da1f2; color: white; }
         .del-btn { background: #e0245e; color: white; margin-top: 10px; }
-        .list-btn { background: #ffffff; color: #15202b; margin-bottom: 25px; text-decoration: none; display: flex; align-items: center; justify-content: center; height: 60px; }
         
         .report-item { background: #192734; padding: 15px; margin-bottom: 10px; border-radius: 10px; border: 1px solid #38444d; text-align: left; word-break: break-all; }
         .loading { opacity: 0.5; pointer-events: none; }
@@ -31,8 +30,6 @@
 </div>
 
 <div id="addPage" class="container">
-    <a href="https://x.com/i/lists/2007646740439285843" target="_blank" class="btn list-btn">🚀 Xの監視リストを開く</a>
-    
     <div class="input-card">
         <p style="margin-top:0;">通報するツイートのURLを貼り付け</p>
         <input type="text" id="urlInput" placeholder="https://x.com/...">
@@ -64,7 +61,6 @@
 
         document.body.classList.add('loading');
         try {
-            // URLに特殊な文字が含まれていても大丈夫なように変換してGASに送ります
             await fetch(`${apiURL}?action=${type}&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
             alert(type === 'add' ? '追加完了！' : '削除完了！');
             input.value = '';
