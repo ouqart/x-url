@@ -3,71 +3,60 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>監視＆通報サポート</title>
+    <title>監視ツール</title>
     <style>
         body { font-family: sans-serif; background: #f0f2f5; margin: 0; padding: 10px; }
         .header { background: #1da1f2; color: white; padding: 15px; border-radius: 10px; margin-bottom: 15px; text-align: center; }
         .account-section { background: white; margin-bottom: 20px; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
         .account-id { font-weight: bold; font-size: 1.2em; color: #1da1f2; margin-bottom: 10px; display: block; }
         .timeline-btn { display: inline-block; background: #1da1f2; color: white; padding: 8px 15px; text-decoration: none; border-radius: 20px; font-size: 0.9em; margin-bottom: 10px; }
-        .tweet-embed { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     </style>
 </head>
 <body>
 
 <div class="header">
     <h2>監視アカウント一覧</h2>
-    <p>シートのIDから最新投稿を表示します</p>
 </div>
 
 <div id="container">読み込み中...</div>
 
 <script>
-    // あなたのスプレッドシートID
-    const sheetId = '1G8tUTGLojH1Cr1y83fSKk074UHJDHz-XWRKUZG2rfvM';
-    // CSVとして読み込むURL
+    // あなたの新しいスプレッドシートID
+    const sheetId = '12dHiHr2XCXcJfnMTG7uADzZ3VB36fKRKGZRrj4nUXXw';
     const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
 
     async function loadAccounts() {
         try {
             const response = await fetch(csvUrl);
             const data = await response.text();
-            const rows = data.split('\n').map(row => row.split(',')[0].trim()).filter(id => id && id !== 'URL' && id !== 'タイムスタンプ');
+            // A列のIDを取得（1行目は見出しとして飛ばす）
+            const rows = data.split('\n').map(row => row.split(',')[0].trim()).filter(id => id && id !== 'URL' && id !== 'ID' && id !== 'アカウント');
 
             const container = document.getElementById('container');
             container.innerHTML = '';
-
-            if (rows.length === 0) {
-                container.innerHTML = 'アカウントIDがシートに見つかりません。';
-                return;
-            }
 
             rows.forEach(id => {
                 const section = document.createElement('div');
                 section.className = 'account-section';
                 section.innerHTML = `
                     <span class="account-id">@${id}</span>
-                    <a href="https://x.com/${id}" target="_blank" class="timeline-btn">Xでプロフィールを見る</a>
+                    <a href="https://x.com/${id}" target="_blank" class="timeline-btn">プロフィールを開く</a>
                     <div class="tweet-embed">
-                        <a class="twitter-timeline" data-height="400" data-theme="light" href="https://twitter.com/${id}?ref_src=twsrc%5Etfw">最新の投稿を読み込み中...</a>
+                        <a class="twitter-timeline" data-height="500" data-theme="light" href="https://twitter.com/${id}?ref_src=twsrc%5Etfw">読み込み中...</a>
                     </div>
                 `;
                 container.appendChild(section);
             });
 
-            // Twitterの埋め込みスクリプトをロード
             const script = document.createElement('script');
             script.src = "https://platform.twitter.com/widgets.js";
-            script.charset = "utf-8";
             document.body.appendChild(script);
 
-        } catch (error) {
-            document.getElementById('container').innerHTML = 'データの読み込みに失敗しました。シートの共有設定を確認してください。';
+        } catch (e) {
+            document.getElementById('container').innerHTML = '読み込みエラー。シートの設定を確認してください。';
         }
     }
-
     loadAccounts();
 </script>
-
 </body>
 </html>
