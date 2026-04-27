@@ -10,15 +10,12 @@
         .nav-item { cursor: pointer; font-weight: bold; font-size: 14px; padding: 5px 15px; border-radius: 20px; }
         .nav-item.active { background: white; color: #1da1f2; }
         .container { max-width: 600px; margin: auto; padding: 10px; padding-bottom: 80px; }
-        .card { background: #192734; margin-bottom: 20px; border-radius: 15px; overflow: hidden; border: 1px solid #38444d; position: relative; }
-        .account-info { padding: 10px; font-weight: bold; border-bottom: 1px solid #38444d; display: flex; justify-content: space-between; align-items: center; }
-        .action-area { padding: 12px; background: #22303c; text-align: center; }
-        .btn { border: none; padding: 10px 20px; border-radius: 25px; font-weight: bold; cursor: pointer; width: 100%; font-size: 15px; transition: 0.2s; }
-        .add-btn { background: #e0245e; color: white; }
-        .del-btn { background: #657786; color: white; }
-        .btn:active { transform: scale(0.95); opacity: 0.8; }
-        .report-item { padding: 15px; border-bottom: 1px solid #38444d; word-break: break-all; }
-        .empty-msg { text-align: center; padding: 50px; color: #8899a6; }
+        .card { background: #192734; margin-bottom: 25px; border-radius: 15px; overflow: hidden; border: 1px solid #38444d; }
+        .account-info { padding: 10px; font-weight: bold; background: #22303c; border-bottom: 1px solid #38444d; }
+        .action-area { padding: 12px; background: #22303c; border-top: 1px solid #38444d; }
+        .btn { border: none; padding: 12px; border-radius: 25px; font-weight: bold; cursor: pointer; width: 100%; font-size: 15px; transition: 0.2s; background: #e0245e; color: white; }
+        .del-btn { background: #657786; }
+        .tweet-container { min-height: 400px; background: #15202b; }
     </style>
 </head>
 <body>
@@ -49,12 +46,11 @@
         if(page === 'manage') loadReports();
     }
 
-    // accountsシートからIDを読み取ってタイムラインを表示
     async function loadWatch() {
         try {
             const res = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`);
             const text = await res.text();
-            const ids = text.split('\n').map(r => r.split(',')[0].trim()).filter(id => id && id !== 'ID' && id !== 'URL');
+            const ids = text.split('\n').map(r => r.split(',')[0].trim()).filter(id => id && id !== 'ID' && id !== 'アカウント');
             
             const list = document.getElementById('watchList');
             list.innerHTML = '';
@@ -63,71 +59,50 @@
                 const div = document.createElement('div');
                 div.className = 'card';
                 div.innerHTML = `
-                    <div class="account-info"><span>@${id}</span></div>
-                    <a class="twitter-timeline" data-height="500" data-theme="dark" href="https://twitter.com/${id}"></a>
+                    <div class="account-info">@${id} の最新投稿</div>
+                    <div class="tweet-container">
+                        <a class="twitter-timeline" data-height="500" data-theme="dark" data-chrome="noheader nofooter noborders" href="https://twitter.com/${id}"></a>
+                    </div>
                     <div class="action-area">
-                        <button class="btn add-btn" onclick="sendAction('add', 'https://x.com/${id}')">これを「通報リスト」に追加</button>
+                        <button class="btn" onclick="sendAction('add', 'https://x.com/${id}')">これを「通報リスト」に追加</button>
                     </div>
                 `;
                 list.appendChild(div);
             });
-            if(window.twttr) twttr.widgets.load();
+            // Xのウィジェットを強制リロード
+            if(window.twttr && twttr.widgets) twttr.widgets.load();
         } catch (e) {
-            document.getElementById('watchList').innerHTML = 'IDの読み込みに失敗しました。';
+            document.getElementById('watchList').innerHTML = '読み込み失敗。シートを確認してください。';
         }
     }
 
-    // reportsシートから現在のリストを取得
     async function loadReports() {
         const list = document.getElementById('reportList');
-        list.innerHTML = '<p style="text-align:center;">確認中...</p>';
+        list.innerHTML = '<p style="text-align:center;">読み込み中...</p>';
         try {
             const res = await fetch(`${apiURL}?action=getReports`);
             const urls = await res.json();
-            
-            if(urls.length === 0) {
-                list.innerHTML = '<div class="empty-msg">リストは空です</div>';
-                return;
-            }
-
             list.innerHTML = '';
+            if(urls.length === 0) { list.innerHTML = '<div style="text-align:center;padding:50px;">リストは空です</div>'; return; }
             urls.forEach(url => {
                 const div = document.createElement('div');
                 div.className = 'card';
                 div.innerHTML = `
-                    <div class="report-item">${url}</div>
-                    <div class="action-area">
-                        <button class="btn del-btn" onclick="sendAction('delete', '${url}')">このリンクを削除</button>
-                    </div>
+                    <div style="padding:15px; word-break:break-all;">${url}</div>
+                    <div class="action-area"><button class="btn del-btn" onclick="sendAction('delete', '${url}')">削除</button></div>
                 `;
                 list.appendChild(div);
             });
-        } catch (e) {
-            list.innerHTML = '<p style="text-align:center;">取得できませんでした</p>';
-        }
+        } catch (e) { list.innerHTML = '取得失敗'; }
     }
 
-    // GASに命令を送る（追加・削除）
     async function sendAction(type, url) {
-        const confirmMsg = type === 'add' ? '通報リストに追加しますか？' : 'リストから削除しますか？';
-        if(!confirm(confirmMsg)) return;
-
-        // 読み込み中表示
-        const btn = event.target;
-        const originalText = btn.innerText;
-        btn.innerText = '処理中...';
-        btn.disabled = true;
-
+        if(!confirm('実行しますか？')) return;
         try {
             await fetch(`${apiURL}?action=${type}&url=${url}`, { mode: 'no-cors' });
-            alert('完了しました！');
+            alert('完了しました');
             if(type === 'delete') loadReports();
-        } catch (e) {
-            alert('エラーが発生しました');
-        } finally {
-            btn.innerText = originalText;
-            btn.disabled = false;
-        }
+        } catch (e) { alert('エラー'); }
     }
 
     loadWatch();
