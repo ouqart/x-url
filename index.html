@@ -3,110 +3,100 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>管理者専用・最強監視ツール</title>
+    <title>通報リスト・コントローラー</title>
     <style>
-        body { font-family: -apple-system, sans-serif; margin: 0; background: #15202b; color: white; }
-        .nav { position: sticky; top: 0; background: #1da1f2; display: flex; justify-content: space-around; padding: 12px; z-index: 1000; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+        body { font-family: -apple-system, sans-serif; margin: 0; background: #15202b; color: white; text-align: center; }
+        .nav { position: sticky; top: 0; background: #1da1f2; display: flex; justify-content: space-around; padding: 12px; z-index: 1000; }
         .nav-item { cursor: pointer; font-weight: bold; font-size: 14px; padding: 5px 15px; border-radius: 20px; }
         .nav-item.active { background: white; color: #1da1f2; }
-        .container { max-width: 600px; margin: auto; padding: 10px; padding-bottom: 80px; }
-        .card { background: #192734; margin-bottom: 25px; border-radius: 15px; overflow: hidden; border: 1px solid #38444d; }
-        .account-info { padding: 10px; font-weight: bold; background: #22303c; border-bottom: 1px solid #38444d; }
-        .action-area { padding: 12px; background: #22303c; border-top: 1px solid #38444d; }
-        .btn { border: none; padding: 12px; border-radius: 25px; font-weight: bold; cursor: pointer; width: 100%; font-size: 15px; transition: 0.2s; background: #e0245e; color: white; }
-        .del-btn { background: #657786; }
-        .tweet-container { min-height: 400px; background: #15202b; }
+        .container { max-width: 500px; margin: auto; padding: 20px; }
+        
+        .input-card { background: #192734; padding: 20px; border-radius: 15px; border: 1px solid #38444d; margin-bottom: 20px; }
+        input { width: 90%; padding: 12px; border-radius: 10px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 16px; margin-bottom: 15px; }
+        
+        .btn { border: none; padding: 15px; border-radius: 30px; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; transition: 0.2s; }
+        .add-btn { background: #1da1f2; color: white; }
+        .del-btn { background: #e0245e; color: white; margin-top: 10px; }
+        .list-btn { background: #ffffff; color: #15202b; margin-bottom: 25px; text-decoration: none; display: flex; align-items: center; justify-content: center; height: 60px; }
+        
+        .report-item { background: #192734; padding: 15px; margin-bottom: 10px; border-radius: 10px; border: 1px solid #38444d; text-align: left; word-break: break-all; }
+        .loading { opacity: 0.5; pointer-events: none; }
     </style>
 </head>
 <body>
 
 <div class="nav">
-    <div id="nav-watch" class="nav-item active" onclick="showPage('watch')">監視ツール</div>
-    <div id="nav-manage" class="nav-item" onclick="showPage('manage')">通報リスト管理</div>
+    <div id="nav-add" class="nav-item active" onclick="showPage('add')">追加</div>
+    <div id="nav-list" class="nav-item" onclick="showPage('list')">削除・確認</div>
 </div>
 
-<div id="watchPage" class="container">
-    <div id="watchList">読み込み中...</div>
+<div id="addPage" class="container">
+    <a href="https://x.com/i/lists/2007646740439285843" target="_blank" class="btn list-btn">🚀 Xの監視リストを開く</a>
+    
+    <div class="input-card">
+        <p style="margin-top:0;">通報するツイートのURLを貼り付け</p>
+        <input type="text" id="urlInput" placeholder="https://x.com/...">
+        <button id="addBtn" class="btn add-btn" onclick="sendAction('add')">通報リストに追加する</button>
+    </div>
+    <p style="color: #8899a6; font-size: 12px;">※追加ボタンを押すとスプレッドシートが更新されます</p>
 </div>
 
-<div id="managePage" class="container" style="display:none;">
-    <h3 style="padding: 10px;">現在の通報リスト</h3>
-    <div id="reportList"></div>
+<div id="listPage" class="container" style="display:none;">
+    <h3>現在の通報リスト</h3>
+    <div id="reportList">読み込み中...</div>
 </div>
 
 <script>
     const apiURL = 'https://script.google.com/macros/s/AKfycbwNMIqyjChPN5ckansj4zEcv-fEF9G6jnIOrdopZTCLOMMSRH5pZTEpS4U7-7-IJG2s/exec';
-    const sheetId = '12dHiHr2XCXcJfnMTG7uADzZ3VB36fKRKGZRrj4nUXXw';
 
     function showPage(page) {
-        document.getElementById('watchPage').style.display = page === 'watch' ? 'block' : 'none';
-        document.getElementById('managePage').style.display = page === 'manage' ? 'block' : 'none';
-        document.getElementById('nav-watch').classList.toggle('active', page === 'watch');
-        document.getElementById('nav-manage').classList.toggle('active', page === 'manage');
-        if(page === 'manage') loadReports();
+        document.getElementById('addPage').style.display = page === 'add' ? 'block' : 'none';
+        document.getElementById('listPage').style.display = page === 'list' ? 'block' : 'none';
+        document.getElementById('nav-add').classList.toggle('active', page === 'add');
+        document.getElementById('nav-list').classList.toggle('active', page === 'list');
+        if(page === 'list') loadReports();
     }
 
-    async function loadWatch() {
+    async function sendAction(type, urlValue) {
+        const input = document.getElementById('urlInput');
+        const url = urlValue || input.value;
+        if(!url) return alert('URLを入力してください');
+
+        document.body.classList.add('loading');
         try {
-            const res = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`);
-            const text = await res.text();
-            const ids = text.split('\n').map(r => r.split(',')[0].trim()).filter(id => id && id !== 'ID' && id !== 'アカウント');
-            
-            const list = document.getElementById('watchList');
-            list.innerHTML = '';
-            
-            ids.forEach(id => {
-                const div = document.createElement('div');
-                div.className = 'card';
-                div.innerHTML = `
-                    <div class="account-info">@${id} の最新投稿</div>
-                    <div class="tweet-container">
-                        <a class="twitter-timeline" data-height="500" data-theme="dark" data-chrome="noheader nofooter noborders" href="https://twitter.com/${id}"></a>
-                    </div>
-                    <div class="action-area">
-                        <button class="btn" onclick="sendAction('add', 'https://x.com/${id}')">これを「通報リスト」に追加</button>
-                    </div>
-                `;
-                list.appendChild(div);
-            });
-            // Xのウィジェットを強制リロード
-            if(window.twttr && twttr.widgets) twttr.widgets.load();
+            // URLに特殊な文字が含まれていても大丈夫なように変換してGASに送ります
+            await fetch(`${apiURL}?action=${type}&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
+            alert(type === 'add' ? '追加完了！' : '削除完了！');
+            input.value = '';
+            if(type === 'delete') loadReports();
         } catch (e) {
-            document.getElementById('watchList').innerHTML = '読み込み失敗。シートを確認してください。';
+            alert('エラーが発生しました');
         }
+        document.body.classList.remove('loading');
     }
 
     async function loadReports() {
-        const list = document.getElementById('reportList');
-        list.innerHTML = '<p style="text-align:center;">読み込み中...</p>';
+        const listDiv = document.getElementById('reportList');
+        listDiv.innerHTML = '読み込み中...';
         try {
             const res = await fetch(`${apiURL}?action=getReports`);
             const urls = await res.json();
-            list.innerHTML = '';
-            if(urls.length === 0) { list.innerHTML = '<div style="text-align:center;padding:50px;">リストは空です</div>'; return; }
+            listDiv.innerHTML = '';
+            if(urls.length === 0) { listDiv.innerHTML = '<p style="color:#8899a6;">リストは空です</p>'; return; }
+            
             urls.forEach(url => {
-                const div = document.createElement('div');
-                div.className = 'card';
-                div.innerHTML = `
-                    <div style="padding:15px; word-break:break-all;">${url}</div>
-                    <div class="action-area"><button class="btn del-btn" onclick="sendAction('delete', '${url}')">削除</button></div>
+                const item = document.createElement('div');
+                item.className = 'report-item';
+                item.innerHTML = `
+                    <div style="font-size:12px; margin-bottom:10px; color:#8899a6;">${url}</div>
+                    <button class="btn del-btn" style="padding:8px; font-size:12px; width:auto;" onclick="sendAction('delete', '${url}')">このURLをリストから消す</button>
                 `;
-                list.appendChild(div);
+                listDiv.appendChild(item);
             });
-        } catch (e) { list.innerHTML = '取得失敗'; }
+        } catch (e) {
+            listDiv.innerHTML = 'エラー：読み込めませんでした';
+        }
     }
-
-    async function sendAction(type, url) {
-        if(!confirm('実行しますか？')) return;
-        try {
-            await fetch(`${apiURL}?action=${type}&url=${url}`, { mode: 'no-cors' });
-            alert('完了しました');
-            if(type === 'delete') loadReports();
-        } catch (e) { alert('エラー'); }
-    }
-
-    loadWatch();
 </script>
-<script async src="https://platform.twitter.com/widgets.js"></script>
 </body>
 </html>
