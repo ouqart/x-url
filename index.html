@@ -14,6 +14,7 @@
         input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 14px; margin-bottom: 15px; box-sizing: border-box; }
         .btn { border: none; padding: 8px 15px; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 12px; transition: 0.2s; }
         .add-btn { background: #1da1f2; color: white; width: 100%; padding: 15px; font-size: 16px; }
+        .add-btn:disabled { background: #555; cursor: not-allowed; }
         .del-btn { background: #e0245e; color: white; }
         .edit-btn { background: #17bf63; color: white; margin-right: 5px; }
         .save-btn { background: #ffffff; color: #15202b; width: 100%; margin-top: 10px; padding: 10px; }
@@ -37,15 +38,15 @@
 <div id="addPage" class="container">
     <div class="input-card">
         <label style="font-size: 12px; color: #8899a6;">投稿URL</label>
-        <input type="text" id="urlInput" placeholder="https://x.com/username/status/...">
+        <input type="text" id="urlInput" placeholder="https://x.com/...">
         <label style="font-size: 12px; color: #8899a6;">日時</label>
         <input type="datetime-local" id="timeInput">
-        <button class="btn add-btn" onclick="register()">リストに追加</button>
+        <button id="submitBtn" class="btn add-btn" onclick="register()">リストに追加</button>
     </div>
 </div>
 
 <div id="listPage" class="container" style="display:none;">
-    <input type="text" id="searchBar" placeholder="IDで検索..." oninput="renderList()">
+    <input type="text" id="searchBar" placeholder="ID・URLで検索..." oninput="renderList()">
     <div id="reportList">読込中...</div>
 </div>
 
@@ -66,35 +67,52 @@
         if(p === 'list') loadCloudData();
     }
 
-    // ID抽出ロジック（不明を極力出さない）
     function extractId(url) {
         if(!url) return "ID取得不可";
-        const match = url.match(/(?:x|twitter)\.com\/(?:intent\/user\?screen_name=)?([^\/\?\s&]+)/i);
-        if (match && match[1] !== "status" && match[1] !== "i") {
-            return "@" + match[1];
-        }
-        // ステータスURLの場合の再抽出
-        const statusMatch = url.match(/(?:x|twitter)\.com\/([^\/]+)\/status/i);
-        if (statusMatch) return "@" + statusMatch[1];
-        
+        try {
+            const match = url.match(/(?:x|twitter)\.com\/(?:intent\/user\?screen_name=)?([^\/\?\s&]+)/i);
+            if (match && !["status", "i", "home", "explore", "messages", "notifications"].includes(match[1])) {
+                return "@" + match[1];
+            }
+            const statusMatch = url.match(/(?:x|twitter)\.com\/([^\/]+)\/status/i);
+            if (statusMatch) return "@" + statusMatch[1];
+        } catch(e) {}
         return "ID取得不可";
     }
 
     async function register() {
         const url = document.getElementById('urlInput').value.trim();
         const time = document.getElementById('timeInput').value;
-        const id = extractId(url);
+        const btn = document.getElementById('submitBtn');
         if(!url) return;
 
+        const txCheck = db.transaction("meta", "readonly");
+        const existing = await new Promise(res => {
+            txCheck.objectStore("meta").get(url).onsuccess = e => res(e.target.result);
+        });
+
+        // 日時が登録済みなら重複警告。日時が空なら上書き許可。
+        if (existing && existing.time) {
+            alert("このURLは既に日時付きで登録されています。");
+            return;
+        }
+
+        btn.disabled = true;
         document.body.classList.add('loading');
+
         try {
+            // スプレッドシートへ（no-corsなので重複しても向こうで処理される想定）
             await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
+            
             const tx = db.transaction("meta", "readwrite");
-            await tx.objectStore("meta").put({ url, id, time, name: "" }); // 名前は空で保存
-            alert("登録しました");
+            await tx.objectStore("meta").put({ url, id: extractId(url), time, name: "" });
+            
+            alert(existing ? "既存データの日時を更新しました" : "登録しました");
             document.getElementById('urlInput').value = "";
             document.getElementById('timeInput').value = "";
         } catch (e) { alert("エラー"); }
+
+        btn.disabled = false;
         document.body.classList.remove('loading');
     }
 
@@ -120,13 +138,11 @@
 
         listDiv.innerHTML = '';
         cloudUrls.map(url => {
-            const local = allLocal.find(l => l.url === url) || { url, id: extractId(url), time: '' };
-            return local;
+            return allLocal.find(l => l.url === url) || { url, id: extractId(url), time: '' };
         })
         .sort((a,b) => (b.time || "").localeCompare(a.time || "") || 1)
         .forEach((d, i) => {
             if (!d.id.toLowerCase().includes(q) && !d.url.toLowerCase().includes(q)) return;
-            
             const item = document.createElement('div');
             item.className = 'report-item';
             item.innerHTML = `
@@ -139,7 +155,7 @@
                 </div>
                 <div id="edit-${i}" class="edit-mode">
                     <input type="datetime-local" id="et-${i}" value="${d.time}">
-                    <button class="btn save-btn" onclick="updateTime('${d.url.replace(/'/g, "\\'")}', '${d.id}', ${i})">日時を保存</button>
+                    <button class="btn save-btn" onclick="updateTime('${d.url.replace(/'/g, "\\'")}', '${d.id}', ${i})">保存</button>
                 </div>`;
             listDiv.appendChild(item);
         });
