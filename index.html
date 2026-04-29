@@ -15,15 +15,14 @@
         input, select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 14px; margin-bottom: 10px; box-sizing: border-box; }
         .btn { border: none; padding: 12px; border-radius: 25px; font-weight: bold; cursor: pointer; font-size: 15px; width: 100%; background: #1da1f2; color: white; }
         .report-item { background: #192734; padding: 15px; margin-bottom: 12px; border-radius: 12px; border: 1px solid #38444d; text-align: left; }
-        
-        /* IDを最優先で大きく表示 */
         .item-id { font-weight: bold; font-size: 20px; color: #1da1f2; display: block; margin-bottom: 2px; }
         .item-time { font-size: 15px; color: #ffffff; margin-bottom: 5px; display: block; }
         .item-url { font-size: 10px; color: #8899a6; word-break: break-all; opacity: 0.6; margin-bottom: 10px; }
-        
         .action-btns { display: flex; gap: 8px; }
         .edit-btn { background: #38444d; color: white; border: none; border-radius: 20px; padding: 6px 12px; font-size: 11px; cursor: pointer; }
         .del-btn { background: #e0245e; color: white; border: none; border-radius: 20px; padding: 6px 12px; font-size: 11px; font-weight: bold; cursor: pointer; }
+        #editModal { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#192734; padding:20px; border-radius:15px; border:2px solid #1da1f2; z-index:2000; width:80%; max-width:300px; }
+        .overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1999; }
         .loading { opacity: 0.5; pointer-events: none; }
     </style>
 </head>
@@ -46,8 +45,9 @@
 
 <div id="listPage" class="container" style="display:none;">
     <div class="search-card">
-        <label>ID検索 / 絞り込み</label>
-        <input type="text" id="searchInput" placeholder="IDを入力して検索..." oninput="renderList()">
+        <label>IDまたはURLで検索</label>
+        <input type="text" id="searchInput" placeholder="検索キーワードを入力..." oninput="renderList()">
+        <label>ID絞り込み</label>
         <select id="idFilter" onchange="renderList()">
             <option value="">すべてのIDを表示</option>
         </select>
@@ -55,11 +55,20 @@
     <div id="reportList">読込中...</div>
 </div>
 
+<div id="overlay" class="overlay" onclick="closeModal()"></div>
+<div id="editModal">
+    <label>投稿日時の修正</label>
+    <input type="datetime-local" id="modalTimeInput">
+    <button class="btn" id="saveBtn">保存</button>
+    <button class="edit-btn" style="width:100%; margin-top:10px;" onclick="closeModal()">キャンセル</button>
+</div>
+
 <script>
     const apiURL = 'https://script.google.com/macros/s/AKfycbxFDKluZz2nOvYOerxhzTQP5jEzjFf9Dot9kStebCVvr2qOeX8xdvfBjg-pMdif6B7y/exec';
 
     let db;
     let cloudUrls = [];
+    let currentEditUrl = '';
 
     const request = indexedDB.open("AdminDB", 1);
     request.onupgradeneeded = e => e.target.result.createObjectStore("meta", { keyPath: "url" });
@@ -134,37 +143,62 @@
             };
         });
 
-        listDiv.innerHTML = '';
-        [...new Set(cloudUrls)].forEach(u => {
-            const displayId = extractId(u);
-            // 検索と選択フィルタの適用
-            if (filterId && displayId !== filterId) return;
-            if (searchText && !displayId.toLowerCase().includes(searchText)) return;
+        // データを整理（ローカルの日時情報を紐付け）
+        let items = [...new Set(cloudUrls)].map(u => {
+            const localData = allLocal.find(l => l.url === u);
+            return { url: u, time: localData ? localData.time : '' };
+        });
 
-            const d = allLocal.find(l => l.url === u) || { url: u, time: '' };
+        // ★ 日時の新しい順（降順）にソート
+        items.sort((a, b) => {
+            if (!a.time) return 1;
+            if (!b.time) return -1;
+            return b.time.localeCompare(a.time);
+        });
+
+        listDiv.innerHTML = '';
+        items.forEach(d => {
+            const displayId = extractId(d.url);
+            
+            const isMatchSearch = !searchText || displayId.toLowerCase().includes(searchText) || d.url.toLowerCase().includes(searchText);
+            const isMatchFilter = !filterId || displayId === filterId;
+
+            if (!isMatchSearch || !isMatchFilter) return;
+
             const item = document.createElement('div');
             item.className = 'report-item';
-            
             const displayTime = d.time ? d.time.replace('T', ' ') : '日時未設定';
 
             item.innerHTML = `
                 <div class="item-id">${displayId}</div>
                 <div class="item-time">${displayTime}</div>
-                <div class="item-url">${u}</div>
+                <div class="item-url">${d.url}</div>
                 <div class="action-btns">
-                    <button class="edit-btn" onclick="editTime('${u}', '${d.time}')">日時編集</button>
-                    <button class="del-btn" onclick="deleteItem('${u}')">消去</button>
+                    <button class="edit-btn" onclick="openEditModal('${d.url}', '${d.time}')">日時編集</button>
+                    <button class="del-btn" onclick="deleteItem('${d.url}')">消去</button>
                 </div>`;
             listDiv.appendChild(item);
         });
     }
 
-    async function editTime(url, currentTime) {
-        const newTime = prompt("新しい投稿日時を入力してください（例: 2024-04-29T16:05）", currentTime);
-        if (newTime === null) return;
-        const tx = db.transaction("meta", "readwrite");
-        await tx.objectStore("meta").put({ url, time: newTime });
-        renderList();
+    function openEditModal(url, time) {
+        currentEditUrl = url;
+        document.getElementById('modalTimeInput').value = time;
+        document.getElementById('editModal').style.display = 'block';
+        document.getElementById('overlay').style.display = 'block';
+        
+        document.getElementById('saveBtn').onclick = async () => {
+            const newTime = document.getElementById('modalTimeInput').value;
+            const tx = db.transaction("meta", "readwrite");
+            await tx.objectStore("meta").put({ url: currentEditUrl, time: newTime });
+            closeModal();
+            renderList();
+        };
+    }
+
+    function closeModal() {
+        document.getElementById('editModal').style.display = 'none';
+        document.getElementById('overlay').style.display = 'none';
     }
 
     async function deleteItem(url) {
