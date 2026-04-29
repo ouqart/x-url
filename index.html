@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>通報リスト・コントローラー</title>
+    <title>管理者用コントローラー</title>
     <style>
         body { font-family: -apple-system, sans-serif; margin: 0; background: #15202b; color: white; text-align: center; }
         .nav { position: sticky; top: 0; background: #1da1f2; display: flex; justify-content: space-around; padding: 12px; z-index: 1000; }
@@ -14,13 +14,11 @@
         input { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 14px; margin-bottom: 10px; box-sizing: border-box; }
         .btn { border: none; padding: 10px; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 13px; transition: 0.2s; }
         .add-btn { background: #1da1f2; color: white; width: 100%; padding: 15px; font-size: 16px; }
-        .del-btn { background: #e0245e; color: white; padding: 5px 12px; }
-        .edit-btn { background: #17bf63; color: white; padding: 5px 12px; margin-right: 5px; }
-        .save-btn { background: #ffffff; color: #15202b; padding: 5px 12px; margin-top: 5px; }
+        .del-btn { background: #e0245e; color: white; padding: 4px 10px; font-size: 11px; }
+        .edit-btn { background: #17bf63; color: white; padding: 4px 10px; font-size: 11px; margin-right: 5px; }
         .report-item { background: #192734; padding: 15px; margin-bottom: 10px; border-radius: 10px; border: 1px solid #38444d; text-align: left; }
         .item-info { font-size: 11px; color: #8899a6; margin-bottom: 5px; }
-        .item-url { font-size: 13px; color: #1da1f2; margin-bottom: 8px; word-break: break-all; }
-        .edit-mode { display: none; margin-top: 10px; border-top: 1px dashed #38444d; padding-top: 10px; }
+        .edit-box { display: none; margin-top: 10px; border-top: 1px dashed #38444d; padding-top: 10px; }
         #searchBar { border: 2px solid #1da1f2; margin-bottom: 20px; }
         .loading { opacity: 0.5; pointer-events: none; }
     </style>
@@ -37,26 +35,31 @@
         <input type="text" id="urlInput" placeholder="URL">
         <input type="text" id="nameInput" placeholder="ユーザー名">
         <input type="datetime-local" id="timeInput">
-        <button id="addBtn" class="btn add-btn" onclick="checkAndSend()">登録</button>
+        <button class="btn add-btn" onclick="register()">登録</button>
     </div>
 </div>
 
 <div id="listPage" class="container" style="display:none;">
-    <input type="text" id="searchBar" placeholder="名前・ID検索" oninput="renderReports()">
+    <input type="text" id="searchBar" placeholder="名前・ID検索" oninput="renderList()">
     <div id="reportList">読み込み中...</div>
 </div>
 
 <script>
     const apiURL = 'https://script.google.com/macros/s/AKfycbwNMIqyjChPN5ckansj4zEcv-fEF9G6jnIOrdopZTCLOMMSRH5pZTEpS4U7-7-IJG2s/exec';
-    const SEP = '[SEP]';
-    let currentLinks = [];
+    let db;
+    let cloudUrls = [];
 
-    function showPage(page) {
-        document.getElementById('addPage').style.display = page === 'add' ? 'block' : 'none';
-        document.getElementById('listPage').style.display = page === 'list' ? 'block' : 'none';
-        document.getElementById('nav-add').classList.toggle('active', page === 'add');
-        document.getElementById('nav-list').classList.toggle('active', page === 'list');
-        if(page === 'list') loadReports();
+    // ブラウザ内データベース(IndexedDB)の準備
+    const request = indexedDB.open("AdminDB", 1);
+    request.onupgradeneeded = e => e.target.result.createObjectStore("meta", { keyPath: "url" });
+    request.onsuccess = e => { db = e.target.result; loadCloudData(); };
+
+    function showPage(p) {
+        document.getElementById('addPage').style.display = p === 'add' ? 'block' : 'none';
+        document.getElementById('listPage').style.display = p === 'list' ? 'block' : 'none';
+        document.getElementById('nav-add').classList.toggle('active', p === 'add');
+        document.getElementById('nav-list').classList.toggle('active', p === 'list');
+        if(p === 'list') loadCloudData();
     }
 
     function extractId(url) {
@@ -64,66 +67,69 @@
         return m ? m[1] : '不明';
     }
 
-    async function checkAndSend() {
+    // 保存処理
+    async function register() {
         const url = document.getElementById('urlInput').value.trim();
         const name = document.getElementById('nameInput').value.trim();
         const time = document.getElementById('timeInput').value;
         const id = extractId(url);
         if(!url) return;
 
-        // 同じURLの古いデータがあれば先に削除（重複防止）
-        const oldData = currentLinks.find(l => l.url === url);
-        if (oldData) await sendAction('delete', oldData.raw, null, true);
+        // 1. スプレッドシートにはURLだけ送る
+        document.body.classList.add('loading');
+        await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
 
-        if (name) await syncNamesById(id, name);
-        const composite = `${url}${SEP}${name}${SEP}${id}${SEP}${time}`;
-        sendAction('add', composite);
+        // 2. ブラウザ内DBに名前と日時を保存
+        const tx = db.transaction("meta", "readwrite");
+        tx.objectStore("meta").put({ url, name, id, time });
+        
+        alert("完了");
+        ["urlInput","nameInput","timeInput"].forEach(i => document.getElementById(i).value="");
+        document.body.classList.remove('loading');
     }
 
-    async function sendAction(type, value, oldRaw = null, silent = false) {
-        if(!silent) document.body.classList.add('loading');
-        try {
-            if(type === 'update') {
-                await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(oldRaw)}`, { mode: 'no-cors' });
-                await fetch(`${apiURL}?action=add&url=${encodeURIComponent(value)}`, { mode: 'no-cors' });
-            } else {
-                await fetch(`${apiURL}?action=${type}&url=${encodeURIComponent(value)}`, { mode: 'no-cors' });
-            }
-            if(!silent) { alert('完了'); loadReports(); }
-        } catch (e) { if(!silent) alert('エラー'); }
-        if(!silent) document.body.classList.remove('loading');
-    }
-
-    async function loadReports() {
+    async function loadCloudData() {
         const res = await fetch(`${apiURL}?action=getReports`);
-        const data = await res.json();
-        currentLinks = data.map((raw, i) => {
-            const p = raw.split(SEP);
-            return { raw: raw, idx: i, url: p[0] || raw, name: p[1] || '', id: p[2] || extractId(p[0] || raw), time: p[3] || '' };
-        }).sort((a, b) => (b.time && a.time) ? b.time.localeCompare(a.time) : b.idx - a.idx);
-        renderReports();
+        cloudUrls = await res.json();
+        renderList();
     }
 
-    function renderReports() {
+    async function renderList() {
         const q = document.getElementById('searchBar').value.toLowerCase();
         const listDiv = document.getElementById('reportList');
         listDiv.innerHTML = '';
-        currentLinks.forEach(d => {
+
+        const tx = db.transaction("meta", "readonly");
+        const store = tx.objectStore("meta");
+
+        const displayData = await Promise.all(cloudUrls.map(url => {
+            return new Promise(resolve => {
+                const req = store.get(url);
+                req.onsuccess = () => {
+                    const meta = req.result || { name: '', time: '', id: extractId(url) };
+                    resolve({ url, ...meta });
+                };
+            });
+        }));
+
+        // 日時(投稿順) > 登録順でソート
+        displayData.sort((a,b) => b.time.localeCompare(a.time) || 1).forEach((d, i) => {
             if (!d.name.toLowerCase().includes(q) && !d.id.toLowerCase().includes(q)) return;
+
             const item = document.createElement('div');
             item.className = 'report-item';
             item.innerHTML = `
                 <div class="item-info">@${d.id} | ${d.time || '日時なし'}</div>
-                <div style="font-weight:bold; font-size:14px; margin-bottom:5px;">${d.name || '(名前なし)'}</div>
-                <div class="item-url">${d.url}</div>
-                <div style="text-align:right;">
-                    <button class="btn edit-btn" onclick="toggleEdit(${d.idx})">編集</button>
-                    <button class="btn del-btn" onclick="sendAction('delete', '${d.raw.replace(/'/g, "\\'")}')">削除</button>
+                <div style="font-weight:bold; font-size:14px; margin-bottom:5px;">${d.name || '(未登録)'}</div>
+                <div style="font-size:12px; color:#1da1f2; word-break:all;">${d.url}</div>
+                <div style="text-align:right; margin-top:10px;">
+                    <button class="btn edit-btn" onclick="toggleEdit(${i})">編集</button>
+                    <button class="btn del-btn" onclick="deleteItem('${d.url}')">削除</button>
                 </div>
-                <div id="editBox-${d.idx}" class="edit-mode">
-                    <input type="text" value="${d.name}" id="en-${d.idx}">
-                    <input type="datetime-local" value="${d.time}" id="et-${d.idx}">
-                    <button class="btn save-btn" onclick="saveEdit(${d.idx})">一括更新</button>
+                <div id="edit-${i}" class="edit-box">
+                    <input type="text" id="en-${i}" value="${d.name}" placeholder="名前">
+                    <input type="datetime-local" id="et-${i}" value="${d.time}">
+                    <button class="btn" style="background:white; color:black; width:100%;" onclick="updateMeta('${d.url}', ${i}, '${d.id}')">一括保存</button>
                 </div>
             `;
             listDiv.appendChild(item);
@@ -131,28 +137,35 @@
     }
 
     function toggleEdit(i) {
-        const box = document.getElementById(`editBox-${i}`);
-        box.style.display = box.style.display === 'block' ? 'none' : 'block';
+        const b = document.getElementById(`edit-${i}`);
+        b.style.display = b.style.display === 'block' ? 'none' : 'block';
     }
 
-    async function syncNamesById(targetId, newName) {
-        const targets = currentLinks.filter(l => l.id === targetId && l.name !== newName);
-        for (const item of targets) {
-            const updatedRaw = `${item.url}${SEP}${newName}${SEP}${item.id}${SEP}${item.time}`;
-            await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(item.raw)}`, { mode: 'no-cors' });
-            await fetch(`${apiURL}?action=add&url=${encodeURIComponent(updatedRaw)}`, { mode: 'no-cors' });
-        }
+    async function updateMeta(url, i, id) {
+        const name = document.getElementById(`en-${i}`).value;
+        const time = document.getElementById(`et-${i}`).value;
+        
+        const tx = db.transaction("meta", "readwrite");
+        const store = tx.objectStore("meta");
+        
+        // 同じIDのデータも一括で名前更新
+        displayData.filter(d => d.id === id).forEach(d => {
+            store.put({ url: d.url, name, id, time: d.time });
+        });
+        // 選択したデータ自体の更新
+        store.put({ url, name, id, time });
+        renderList();
     }
 
-    async function saveEdit(i) {
-        const d = currentLinks.find(l => l.idx === i);
-        const n = document.getElementById(`en-${i}`).value;
-        const t = document.getElementById(`et-${i}`).value;
-        if (n !== d.name) await syncNamesById(d.id, n);
-        sendAction('update', `${d.url}${SEP}${n}${SEP}${d.id}${SEP}${t}`, d.raw);
+    async function deleteItem(url) {
+        if(!confirm("削除しますか？")) return;
+        document.body.classList.add('loading');
+        await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
+        const tx = db.transaction("meta", "readwrite");
+        tx.objectStore("meta").delete(url);
+        loadCloudData();
+        document.body.classList.remove('loading');
     }
-
-    loadReports();
 </script>
 </body>
 </html>
