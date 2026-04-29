@@ -2,169 +2,79 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>管理者用コントローラー</title>
+    <title>データクリーンアップ・コントローラー</title>
     <style>
-        body { font-family: -apple-system, sans-serif; margin: 0; background: #15202b; color: white; text-align: center; }
-        .nav { position: sticky; top: 0; background: #1da1f2; display: flex; justify-content: space-around; padding: 12px; z-index: 1000; }
-        .nav-item { cursor: pointer; font-weight: bold; font-size: 14px; padding: 5px 15px; border-radius: 20px; }
-        .nav-item.active { background: white; color: #1da1f2; }
-        .container { max-width: 500px; margin: auto; padding: 20px; }
-        .input-card { background: #192734; padding: 20px; border-radius: 15px; border: 1px solid #38444d; margin-bottom: 20px; text-align: left; }
-        input { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 14px; margin-bottom: 10px; box-sizing: border-box; }
-        .btn { border: none; padding: 10px; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 13px; transition: 0.2s; }
-        .add-btn { background: #1da1f2; color: white; width: 100%; padding: 15px; font-size: 16px; }
-        .del-btn { background: #e0245e; color: white; padding: 4px 10px; font-size: 11px; }
-        .edit-btn { background: #17bf63; color: white; padding: 4px 10px; font-size: 11px; margin-right: 5px; }
-        .report-item { background: #192734; padding: 15px; margin-bottom: 10px; border-radius: 10px; border: 1px solid #38444d; text-align: left; }
-        .item-info { font-size: 11px; color: #8899a6; margin-bottom: 5px; }
-        .edit-box { display: none; margin-top: 10px; border-top: 1px dashed #38444d; padding-top: 10px; }
-        #searchBar { border: 2px solid #1da1f2; margin-bottom: 20px; }
+        body { font-family: sans-serif; background: #15202b; color: white; text-align: center; padding: 50px; }
+        .log-box { background: #192734; padding: 20px; border-radius: 10px; text-align: left; max-height: 300px; overflow-y: auto; margin: 20px auto; max-width: 500px; font-family: monospace; font-size: 12px; border: 1px solid #38444d; }
+        .btn { background: #1da1f2; color: white; border: none; padding: 15px 30px; border-radius: 30px; font-weight: bold; cursor: pointer; }
         .loading { opacity: 0.5; pointer-events: none; }
     </style>
 </head>
 <body>
 
-<div class="nav">
-    <div id="nav-add" class="nav-item active" onclick="showPage('add')">追加</div>
-    <div id="nav-list" class="nav-item" onclick="showPage('list')">リスト編集</div>
-</div>
-
-<div id="addPage" class="container">
-    <div class="input-card">
-        <input type="text" id="urlInput" placeholder="URL">
-        <input type="text" id="nameInput" placeholder="ユーザー名">
-        <input type="datetime-local" id="timeInput">
-        <button class="btn add-btn" onclick="register()">登録</button>
-    </div>
-</div>
-
-<div id="listPage" class="container" style="display:none;">
-    <input type="text" id="searchBar" placeholder="名前・ID検索" oninput="renderList()">
-    <div id="reportList">読み込み中...</div>
-</div>
+    <h2>スプレッドシート清掃・データ移行</h2>
+    <p>このボタンを押すと、シート内の[SEP]データを掃除し、<br>名前と日時をブラウザの保存領域へ移動します。</p>
+    
+    <button id="startBtn" class="btn" onclick="startCleanup()">掃除と移行を開始する</button>
+    
+    <div id="log" class="log-box">待機中...</div>
 
 <script>
     const apiURL = 'https://script.google.com/macros/s/AKfycbwNMIqyjChPN5ckansj4zEcv-fEF9G6jnIOrdopZTCLOMMSRH5pZTEpS4U7-7-IJG2s/exec';
+    const SEP = '[SEP]';
     let db;
-    let cloudUrls = [];
 
-    // ブラウザ内データベース(IndexedDB)の準備
+    // ブラウザの保存領域(IndexedDB)を準備
     const request = indexedDB.open("AdminDB", 1);
     request.onupgradeneeded = e => e.target.result.createObjectStore("meta", { keyPath: "url" });
-    request.onsuccess = e => { db = e.target.result; loadCloudData(); };
+    request.onsuccess = e => { db = e.target.result; };
 
-    function showPage(p) {
-        document.getElementById('addPage').style.display = p === 'add' ? 'block' : 'none';
-        document.getElementById('listPage').style.display = p === 'list' ? 'block' : 'none';
-        document.getElementById('nav-add').classList.toggle('active', p === 'add');
-        document.getElementById('nav-list').classList.toggle('active', p === 'list');
-        if(p === 'list') loadCloudData();
+    function addLog(msg) {
+        const log = document.getElementById('log');
+        log.innerHTML += `<div>${msg}</div>`;
+        log.scrollTop = log.scrollHeight;
     }
 
-    function extractId(url) {
-        const m = url.match(/(?:x|twitter)\.com\/(?:intent\/user\?screen_name=)?([^\/\?\s&]+)/);
-        return m ? m[1] : '不明';
-    }
+    async function startCleanup() {
+        const btn = document.getElementById('startBtn');
+        btn.classList.add('loading');
+        btn.innerText = "実行中...";
+        addLog("クラウドからデータを取得中...");
 
-    // 保存処理
-    async function register() {
-        const url = document.getElementById('urlInput').value.trim();
-        const name = document.getElementById('nameInput').value.trim();
-        const time = document.getElementById('timeInput').value;
-        const id = extractId(url);
-        if(!url) return;
+        try {
+            const res = await fetch(`${apiURL}?action=getReports`);
+            const data = await res.json();
+            
+            const tx = db.transaction("meta", "readwrite");
+            const store = tx.objectStore("meta");
 
-        // 1. スプレッドシートにはURLだけ送る
-        document.body.classList.add('loading');
-        await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
+            for (const raw of data) {
+                if (raw.includes(SEP)) {
+                    const parts = raw.split(SEP);
+                    const url = parts[0];
+                    const name = parts[1];
+                    const id = parts[2];
+                    const time = parts[3];
 
-        // 2. ブラウザ内DBに名前と日時を保存
-        const tx = db.transaction("meta", "readwrite");
-        tx.objectStore("meta").put({ url, name, id, time });
-        
-        alert("完了");
-        ["urlInput","nameInput","timeInput"].forEach(i => document.getElementById(i).value="");
-        document.body.classList.remove('loading');
-    }
+                    addLog(`移行中: @${id}`);
 
-    async function loadCloudData() {
-        const res = await fetch(`${apiURL}?action=getReports`);
-        cloudUrls = await res.json();
-        renderList();
-    }
+                    // 1. ブラウザ側に名前と日時を保存
+                    store.put({ url, name, id, time });
 
-    async function renderList() {
-        const q = document.getElementById('searchBar').value.toLowerCase();
-        const listDiv = document.getElementById('reportList');
-        listDiv.innerHTML = '';
+                    // 2. クラウドの汚いデータを消す
+                    await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(raw)}`, { mode: 'no-cors' });
 
-        const tx = db.transaction("meta", "readonly");
-        const store = tx.objectStore("meta");
-
-        const displayData = await Promise.all(cloudUrls.map(url => {
-            return new Promise(resolve => {
-                const req = store.get(url);
-                req.onsuccess = () => {
-                    const meta = req.result || { name: '', time: '', id: extractId(url) };
-                    resolve({ url, ...meta });
-                };
-            });
-        }));
-
-        // 日時(投稿順) > 登録順でソート
-        displayData.sort((a,b) => b.time.localeCompare(a.time) || 1).forEach((d, i) => {
-            if (!d.name.toLowerCase().includes(q) && !d.id.toLowerCase().includes(q)) return;
-
-            const item = document.createElement('div');
-            item.className = 'report-item';
-            item.innerHTML = `
-                <div class="item-info">@${d.id} | ${d.time || '日時なし'}</div>
-                <div style="font-weight:bold; font-size:14px; margin-bottom:5px;">${d.name || '(未登録)'}</div>
-                <div style="font-size:12px; color:#1da1f2; word-break:all;">${d.url}</div>
-                <div style="text-align:right; margin-top:10px;">
-                    <button class="btn edit-btn" onclick="toggleEdit(${i})">編集</button>
-                    <button class="btn del-btn" onclick="deleteItem('${d.url}')">削除</button>
-                </div>
-                <div id="edit-${i}" class="edit-box">
-                    <input type="text" id="en-${i}" value="${d.name}" placeholder="名前">
-                    <input type="datetime-local" id="et-${i}" value="${d.time}">
-                    <button class="btn" style="background:white; color:black; width:100%;" onclick="updateMeta('${d.url}', ${i}, '${d.id}')">一括保存</button>
-                </div>
-            `;
-            listDiv.appendChild(item);
-        });
-    }
-
-    function toggleEdit(i) {
-        const b = document.getElementById(`edit-${i}`);
-        b.style.display = b.style.display === 'block' ? 'none' : 'block';
-    }
-
-    async function updateMeta(url, i, id) {
-        const name = document.getElementById(`en-${i}`).value;
-        const time = document.getElementById(`et-${i}`).value;
-        
-        const tx = db.transaction("meta", "readwrite");
-        const store = tx.objectStore("meta");
-        
-        // 同じIDのデータも一括で名前更新
-        displayData.filter(d => d.id === id).forEach(d => {
-            store.put({ url: d.url, name, id, time: d.time });
-        });
-        // 選択したデータ自体の更新
-        store.put({ url, name, id, time });
-        renderList();
-    }
-
-    async function deleteItem(url) {
-        if(!confirm("削除しますか？")) return;
-        document.body.classList.add('loading');
-        await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
-        const tx = db.transaction("meta", "readwrite");
-        tx.objectStore("meta").delete(url);
-        loadCloudData();
-        document.body.classList.remove('loading');
+                    // 3. クラウドにURLだけを入れ直す
+                    await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
+                }
+            }
+            addLog("--- すべて完了しました ---");
+            alert("移行が完了しました。スプレッドシートはURLだけになりました。");
+        } catch (e) {
+            addLog("エラーが発生しました。");
+        }
+        btn.classList.remove('loading');
+        btn.innerText = "完了";
     }
 </script>
 </body>
