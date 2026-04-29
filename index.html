@@ -44,7 +44,10 @@
 </div>
 
 <div id="listPage" class="container" style="display:none;">
-    <input type="text" id="searchBar" placeholder="名前・ID検索" oninput="renderList()">
+    <input type="text" id="searchBar" placeholder="名前・ID検索" 
+        oninput="renderList()" 
+        onchange="renderList()" 
+        oncompositionend="renderList()">
     <div id="reportList">読込中...</div>
 </div>
 
@@ -52,7 +55,6 @@
     const apiURL = 'https://script.google.com/macros/s/AKfycbwNMIqyjChPN5ckansj4zEcv-fEF9G6jnIOrdopZTCLOMMSRH5pZTEpS4U7-7-IJG2s/exec';
     let db;
     let cloudUrls = [];
-    let allMeta = []; // 同期用
 
     const request = indexedDB.open("AdminDB", 1);
     request.onupgradeneeded = e => e.target.result.createObjectStore("meta", { keyPath: "url" });
@@ -72,44 +74,18 @@
         return match ? match[1] : "不明";
     }
 
-    async function register() {
-        const url = document.getElementById('urlInput').value.trim();
-        const name = document.getElementById('nameInput').value.trim();
-        const time = document.getElementById('timeInput').value;
-        const id = extractId(url);
-        if(!url) return alert("URLを入力してください");
-
-        document.body.classList.add('loading');
-        await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
-
-        const tx = db.transaction("meta", "readwrite");
-        const store = tx.objectStore("meta");
-
-        // 【修正】追加時に同じIDのデータがあれば名前を同期する
-        if (name) {
-            await syncNamesInDB(id, name);
-        }
-
-        await store.put({ url, name, id, time });
-        
-        alert("登録完了");
-        ["urlInput","nameInput","timeInput"].forEach(i => document.getElementById(i).value="");
-        document.body.classList.remove('loading');
-    }
-
-    // DB内の特定のIDの名前を一括更新する共通関数
     function syncNamesInDB(id, newName) {
         return new Promise((resolve) => {
             const tx = db.transaction("meta", "readwrite");
             const store = tx.objectStore("meta");
-            const request = store.openCursor();
-            request.onsuccess = (e) => {
+            const req = store.openCursor();
+            req.onsuccess = (e) => {
                 const cursor = e.target.result;
                 if (cursor) {
-                    if (cursor.value.id === id && cursor.value.name !== newName) {
-                        const updatedData = cursor.value;
-                        updatedData.name = newName;
-                        cursor.update(updatedData);
+                    if (cursor.value.id === id) {
+                        const data = cursor.value;
+                        data.name = newName;
+                        cursor.update(data);
                     }
                     cursor.continue();
                 } else {
@@ -117,6 +93,25 @@
                 }
             };
         });
+    }
+
+    async function register() {
+        const url = document.getElementById('urlInput').value.trim();
+        const name = document.getElementById('nameInput').value.trim();
+        const time = document.getElementById('timeInput').value;
+        const id = extractId(url);
+        if(!url) return;
+
+        document.body.classList.add('loading');
+        try {
+            await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
+            if (name) await syncNamesInDB(id, name);
+            const tx = db.transaction("meta", "readwrite");
+            await tx.objectStore("meta").put({ url, name, id, time });
+            alert("登録完了");
+            ["urlInput","nameInput","timeInput"].forEach(i => document.getElementById(i).value="");
+        } catch (e) { alert("エラー"); }
+        document.body.classList.remove('loading');
     }
 
     async function loadCloudData() {
@@ -128,23 +123,22 @@
     async function renderList() {
         const q = document.getElementById('searchBar').value.toLowerCase();
         const listDiv = document.getElementById('reportList');
-        listDiv.innerHTML = '';
-
+        
         const tx = db.transaction("meta", "readonly");
         const store = tx.objectStore("meta");
 
-        allMeta = await Promise.all(cloudUrls.map(url => {
+        const allMeta = await Promise.all(cloudUrls.map(url => {
             return new Promise(resolve => {
                 const req = store.get(url);
                 req.onsuccess = () => {
                     const meta = req.result || { name: '', time: '', id: extractId(url) };
-                    if(meta.id === "不明") meta.id = extractId(url);
                     resolve({ url, ...meta });
                 };
             });
         }));
 
-        allMeta.sort((a,b) => b.time.localeCompare(a.time) || 1).forEach((d, i) => {
+        listDiv.innerHTML = '';
+        allMeta.sort((a, b) => (b.time || "").localeCompare(a.time || "") || 1).forEach((d, i) => {
             if (!d.name.toLowerCase().includes(q) && !d.id.toLowerCase().includes(q)) return;
 
             const item = document.createElement('div');
@@ -155,12 +149,12 @@
                 <div class="item-url">${d.url}</div>
                 <div class="controls">
                     <button class="btn edit-btn" onclick="toggleEdit(${i})">編集</button>
-                    <button class="btn del-btn" onclick="deleteItem('${d.url}')">削除</button>
+                    <button class="btn del-btn" onclick="deleteItem('${d.url.replace(/'/g, "\\'")}')">削除</button>
                 </div>
                 <div id="edit-${i}" class="edit-mode">
-                    <input type="text" id="en-${i}" value="${d.name}" placeholder="ユーザー名">
+                    <input type="text" id="en-${i}" value="${d.name}">
                     <input type="datetime-local" id="et-${i}" value="${d.time}">
-                    <button class="btn save-btn" onclick="updateMeta('${d.url}', ${i}, '${d.id}')">このIDの情報を更新</button>
+                    <button class="btn save-btn" onclick="updateMeta('${d.url.replace(/'/g, "\\'")}', ${i}, '${d.id}')">一括更新</button>
                 </div>
             `;
             listDiv.appendChild(item);
@@ -173,26 +167,24 @@
     }
 
     async function updateMeta(url, i, id) {
-        const name = document.getElementById(`en-${i}`).value;
-        const time = document.getElementById(`et-${i}`).value;
-        
-        await syncNamesInDB(id, name);
-        
+        const n = document.getElementById(`en-${i}`).value;
+        const t = document.getElementById(`et-${i}`).value;
+        document.body.classList.add('loading');
+        await syncNamesInDB(id, n);
         const tx = db.transaction("meta", "readwrite");
-        const store = tx.objectStore("meta");
-        await store.put({ url, name, id, time });
-        
-        renderList();
-        alert("一括更新しました");
+        await tx.objectStore("meta").put({ url, name: n, id, time: t });
+        await renderList();
+        alert("完了");
+        document.body.classList.remove('loading');
     }
 
     async function deleteItem(url) {
-        if(!confirm("削除しますか？")) return;
+        if(!confirm("削除？")) return;
         document.body.classList.add('loading');
         await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
         const tx = db.transaction("meta", "readwrite");
-        tx.objectStore("meta").delete(url);
-        loadCloudData();
+        await tx.objectStore("meta").delete(url);
+        await loadCloudData();
         document.body.classList.remove('loading');
     }
 </script>
