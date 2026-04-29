@@ -11,12 +11,15 @@
         .nav-item.active { background: white; color: #1da1f2; }
         .container { width: 95%; max-width: 500px; margin: auto; padding: 10px; box-sizing: border-box; }
         .input-card { background: #192734; padding: 20px; border-radius: 15px; border: 1px solid #38444d; margin-bottom: 20px; text-align: left; }
+        label { font-size: 11px; color: #8899a6; display: block; margin-bottom: 5px; }
         input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 14px; margin-bottom: 15px; box-sizing: border-box; }
         .btn { border: none; padding: 12px; border-radius: 25px; font-weight: bold; cursor: pointer; font-size: 15px; width: 100%; background: #1da1f2; color: white; }
         .report-item { background: #192734; padding: 15px; margin-bottom: 12px; border-radius: 12px; border: 1px solid #38444d; text-align: left; }
-        .item-id { font-weight: bold; font-size: 16px; color: #1da1f2; }
-        .item-info { font-size: 11px; color: #8899a6; margin: 5px 0; }
-        .del-btn { background: #e0245e; color: white; border: none; border-radius: 20px; padding: 5px 12px; font-size: 12px; font-weight: bold; cursor: pointer; }
+        /* 投稿時間を一番の目印にする */
+        .item-time { font-weight: bold; font-size: 18px; color: #ffffff; display: block; margin-bottom: 3px; }
+        .item-id { font-size: 14px; color: #1da1f2; margin-bottom: 5px; }
+        .item-url { font-size: 10px; color: #8899a6; word-break: break-all; opacity: 0.6; }
+        .del-btn { background: #e0245e; color: white; border: none; border-radius: 20px; padding: 8px 15px; font-size: 12px; font-weight: bold; cursor: pointer; }
         .loading { opacity: 0.5; pointer-events: none; }
     </style>
 </head>
@@ -29,11 +32,13 @@
 
 <div id="addPage" class="container">
     <div class="input-card">
-        <label style="font-size: 11px; color: #8899a6;">ターゲットURL</label>
+        <label>ターゲットURL</label>
         <input type="text" id="urlInput" placeholder="https://x.com/...">
-        <label style="font-size: 11px; color: #8899a6;">投稿日時（自分用メモ）</label>
+        
+        <label>投稿日時（ラベル用）</label>
         <input type="datetime-local" id="timeInput">
-        <button id="submitBtn" class="btn" onclick="register()">登録</button>
+        
+        <button id="submitBtn" class="btn" onclick="register()">リストへ追加</button>
     </div>
 </div>
 
@@ -42,7 +47,6 @@
 </div>
 
 <script>
-    // ★自分のGASのURLを入れるのを忘れないでね！
     const apiURL = 'https://script.google.com/macros/s/AKfycbxFDKluZz2nOvYOerxhzTQP5jEzjFf9Dot9kStebCVvr2qOeX8xdvfBjg-pMdif6B7y/exec';
 
     let db;
@@ -52,7 +56,6 @@
     request.onupgradeneeded = e => e.target.result.createObjectStore("meta", { keyPath: "url" });
     request.onsuccess = e => { db = e.target.result; loadCloudData(); };
 
-    // URLからIDをその場で抜き出す魔法の関数
     function extractId(url) {
         const match = url.match(/https?:\/\/(?:x|twitter)\.com\/([^\/\s\?]+)/);
         return match && match[1] ? '@' + match[1] : "不明";
@@ -76,25 +79,21 @@
     async function register() {
         const url = document.getElementById('urlInput').value.trim();
         const time = document.getElementById('timeInput').value;
-        const btn = document.getElementById('submitBtn');
         if(!url) return;
-        btn.disabled = true;
         document.body.classList.add('loading');
         try {
             await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
             const tx = db.transaction("meta", "readwrite");
-            await tx.objectStore("meta").put({ url, time }); // IDは保存せず、表示時に計算する
-            alert("登録しました");
+            await tx.objectStore("meta").put({ url, time });
+            alert("追加しました");
             document.getElementById('urlInput').value = "";
             loadCloudData();
-        } catch (e) { alert("登録エラー"); } finally {
-            btn.disabled = false;
+        } catch (e) { alert("エラー"); } finally {
             document.body.classList.remove('loading');
         }
     }
 
     async function loadCloudData() {
-        if(!apiURL.includes('macros')) return;
         try {
             const res = await fetch(`${apiURL}?action=getReports`);
             cloudUrls = await res.json();
@@ -117,34 +116,33 @@
             const d = allLocal.find(l => l.url === u) || { url: u, time: '' };
             const item = document.createElement('div');
             item.className = 'report-item';
-            const t = d.time ? `日時: ${d.time.replace('T', ' ')}` : '日時未設定';
             
-            // ★ ここがポイント！保存されたデータではなく、URLからその場でIDを計算して出す
+            // 秒なしの分単位で表示
+            const displayTime = d.time ? d.time.replace('T', ' ') : '日時未設定';
             const displayId = extractId(u);
 
             item.innerHTML = `
-                <div style="display:flex; justify-content:space-between; align-items:start;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
                     <div style="flex:1;">
+                        <span class="item-time">${displayTime}</span>
                         <div class="item-id">${displayId}</div>
-                        <div class="item-info">${t}</div>
-                        <div style="font-size:10px;opacity:0.5;word-break:break-all;">${u}</div>
+                        <div class="item-url">${u}</div>
                     </div>
-                    <button class="del-btn" onclick="deleteItem('${u}')">削除</button>
+                    <button class="del-btn" onclick="deleteItem('${u}')">消去</button>
                 </div>`;
             listDiv.appendChild(item);
         });
     }
 
     async function deleteItem(url) {
-        if(!confirm("削除しますか？")) return;
+        if(!confirm("リストから消去しますか？")) return;
         document.body.classList.add('loading');
         try {
             await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
             const tx = db.transaction("meta", "readwrite");
             await tx.objectStore("meta").delete(url);
-            alert("削除しました");
             loadCloudData();
-        } catch (e) { alert("削除エラー"); } finally {
+        } catch (e) { alert("消去エラー"); } finally {
             document.body.classList.remove('loading');
         }
     }
