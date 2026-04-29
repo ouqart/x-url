@@ -9,17 +9,26 @@
         .nav { position: sticky; top: 0; background: #1da1f2; display: flex; justify-content: space-around; padding: 12px; z-index: 1000; }
         .nav-item { cursor: pointer; font-weight: bold; font-size: 14px; padding: 5px 15px; border-radius: 20px; }
         .nav-item.active { background: white; color: #1da1f2; }
-        .container { max-width: 500px; margin: auto; padding: 20px; }
-        .input-card { background: #192734; padding: 20px; border-radius: 15px; border: 1px solid #38444d; margin-bottom: 20px; text-align: left; }
-        input { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 14px; margin-bottom: 10px; box-sizing: border-box; }
-        .btn { border: none; padding: 10px; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 13px; transition: 0.2s; }
-        .add-btn { background: #1da1f2; color: white; width: 100%; padding: 15px; font-size: 16px; }
-        .del-btn { background: #e0245e; color: white; padding: 4px 10px; font-size: 11px; }
-        .edit-btn { background: #17bf63; color: white; padding: 4px 10px; font-size: 11px; margin-right: 5px; }
-        .report-item { background: #192734; padding: 15px; margin-bottom: 10px; border-radius: 10px; border: 1px solid #38444d; text-align: left; }
-        .item-info { font-size: 11px; color: #8899a6; margin-bottom: 5px; }
-        .edit-box { display: none; margin-top: 10px; border-top: 1px dashed #38444d; padding-top: 10px; }
-        #searchBar { border: 2px solid #1da1f2; margin-bottom: 20px; }
+        .container { width: 95%; max-width: 500px; margin: auto; padding: 10px; box-sizing: border-box; }
+        
+        .input-card { background: #192734; padding: 15px; border-radius: 15px; border: 1px solid #38444d; margin-bottom: 20px; text-align: left; }
+        input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 14px; margin-bottom: 10px; box-sizing: border-box; }
+        
+        .btn { border: none; padding: 8px 15px; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 12px; transition: 0.2s; }
+        .add-btn { background: #1da1f2; color: white; width: 100%; padding: 15px; font-size: 16px; margin-top: 5px; }
+        .del-btn { background: #e0245e; color: white; }
+        .edit-btn { background: #17bf63; color: white; margin-right: 5px; }
+        .save-btn { background: #ffffff; color: #15202b; width: 100%; margin-top: 10px; padding: 10px; }
+        
+        .report-item { background: #192734; padding: 15px; margin-bottom: 12px; border-radius: 12px; border: 1px solid #38444d; text-align: left; box-sizing: border-box; overflow: hidden; }
+        .item-info { font-size: 11px; color: #8899a6; margin-bottom: 5px; overflow-wrap: break-word; }
+        .item-name { font-weight: bold; font-size: 15px; margin-bottom: 5px; color: #fff; }
+        .item-url { font-size: 12px; color: #1da1f2; margin-bottom: 12px; word-break: break-all; line-height: 1.4; }
+        
+        .edit-mode { display: none; margin-top: 10px; border-top: 1px solid #38444d; padding-top: 10px; }
+        .controls { display: flex; justify-content: flex-end; align-items: center; }
+        
+        #searchBar { border: 2px solid #1da1f2; margin-top: 10px; }
         .loading { opacity: 0.5; pointer-events: none; }
     </style>
 </head>
@@ -35,13 +44,13 @@
         <input type="text" id="urlInput" placeholder="URL">
         <input type="text" id="nameInput" placeholder="ユーザー名">
         <input type="datetime-local" id="timeInput">
-        <button class="btn add-btn" onclick="register()">登録</button>
+        <button class="btn add-btn" onclick="register()">リストに追加</button>
     </div>
 </div>
 
 <div id="listPage" class="container" style="display:none;">
     <input type="text" id="searchBar" placeholder="名前・ID検索" oninput="renderList()">
-    <div id="reportList">読み込み中...</div>
+    <div id="reportList">読込中...</div>
 </div>
 
 <script>
@@ -49,7 +58,6 @@
     let db;
     let cloudUrls = [];
 
-    // ブラウザ内データベース(IndexedDB)の準備
     const request = indexedDB.open("AdminDB", 1);
     request.onupgradeneeded = e => e.target.result.createObjectStore("meta", { keyPath: "url" });
     request.onsuccess = e => { db = e.target.result; loadCloudData(); };
@@ -62,28 +70,30 @@
         if(p === 'list') loadCloudData();
     }
 
+    // ID抽出を強化
     function extractId(url) {
-        const m = url.match(/(?:x|twitter)\.com\/(?:intent\/user\?screen_name=)?([^\/\?\s&]+)/);
-        return m ? m[1] : '不明';
+        if(!url) return "不明";
+        // 通常のURL、インテントURL、末尾のスラッシュ等に対応
+        const match = url.match(/(?:x|twitter)\.com\/(?:intent\/user\?screen_name=)?([^\/\?\s&]+)/i);
+        return match ? match[1] : "不明";
     }
 
-    // 保存処理
     async function register() {
         const url = document.getElementById('urlInput').value.trim();
         const name = document.getElementById('nameInput').value.trim();
         const time = document.getElementById('timeInput').value;
         const id = extractId(url);
-        if(!url) return;
+        if(!url) return alert("URLを入力してください");
 
-        // 1. スプレッドシートにはURLだけ送る
         document.body.classList.add('loading');
+        // スプレッドシートにはURLのみ
         await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
 
-        // 2. ブラウザ内DBに名前と日時を保存
+        // ローカルにメタ情報を保存
         const tx = db.transaction("meta", "readwrite");
         tx.objectStore("meta").put({ url, name, id, time });
         
-        alert("完了");
+        alert("登録完了");
         ["urlInput","nameInput","timeInput"].forEach(i => document.getElementById(i).value="");
         document.body.classList.remove('loading');
     }
@@ -107,29 +117,31 @@
                 const req = store.get(url);
                 req.onsuccess = () => {
                     const meta = req.result || { name: '', time: '', id: extractId(url) };
+                    // 保存されていなかった場合でも、その場でIDを再抽出して補完
+                    if(meta.id === "不明") meta.id = extractId(url);
                     resolve({ url, ...meta });
                 };
             });
         }));
 
-        // 日時(投稿順) > 登録順でソート
+        // 日時(降順) > 登録順
         displayData.sort((a,b) => b.time.localeCompare(a.time) || 1).forEach((d, i) => {
             if (!d.name.toLowerCase().includes(q) && !d.id.toLowerCase().includes(q)) return;
 
             const item = document.createElement('div');
             item.className = 'report-item';
             item.innerHTML = `
-                <div class="item-info">@${d.id} | ${d.time || '日時なし'}</div>
-                <div style="font-weight:bold; font-size:14px; margin-bottom:5px;">${d.name || '(未登録)'}</div>
-                <div style="font-size:12px; color:#1da1f2; word-break:all;">${d.url}</div>
-                <div style="text-align:right; margin-top:10px;">
+                <div class="item-info">@${d.id} | ${d.time ? d.time.replace('T', ' ') : '日時なし'}</div>
+                <div class="item-name">${d.name || '(名前未設定)'}</div>
+                <div class="item-url">${d.url}</div>
+                <div class="controls">
                     <button class="btn edit-btn" onclick="toggleEdit(${i})">編集</button>
                     <button class="btn del-btn" onclick="deleteItem('${d.url}')">削除</button>
                 </div>
-                <div id="edit-${i}" class="edit-box">
-                    <input type="text" id="en-${i}" value="${d.name}" placeholder="名前">
+                <div id="edit-${i}" class="edit-mode">
+                    <input type="text" id="en-${i}" value="${d.name}" placeholder="ユーザー名">
                     <input type="datetime-local" id="et-${i}" value="${d.time}">
-                    <button class="btn" style="background:white; color:black; width:100%;" onclick="updateMeta('${d.url}', ${i}, '${d.id}')">一括保存</button>
+                    <button class="btn save-btn" onclick="updateMeta('${d.url}', ${i}, '${d.id}', displayData)">このIDの情報を更新</button>
                 </div>
             `;
             listDiv.appendChild(item);
@@ -141,20 +153,20 @@
         b.style.display = b.style.display === 'block' ? 'none' : 'block';
     }
 
-    async function updateMeta(url, i, id) {
+    async function updateMeta(url, i, id, allData) {
         const name = document.getElementById(`en-${i}`).value;
         const time = document.getElementById(`et-${i}`).value;
-        
         const tx = db.transaction("meta", "readwrite");
         const store = tx.objectStore("meta");
         
-        // 同じIDのデータも一括で名前更新
-        displayData.filter(d => d.id === id).forEach(d => {
+        // 同一IDのデータを一括で名前のみ同期
+        allData.filter(d => d.id === id).forEach(d => {
             store.put({ url: d.url, name, id, time: d.time });
         });
-        // 選択したデータ自体の更新
+        // 今回編集した行自体は日時も含めて保存
         store.put({ url, name, id, time });
         renderList();
+        alert("更新しました");
     }
 
     async function deleteItem(url) {
