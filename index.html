@@ -14,16 +14,15 @@
         input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 14px; margin-bottom: 10px; box-sizing: border-box; }
         .btn { border: none; padding: 8px 15px; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 12px; transition: 0.2s; }
         .add-btn { background: #1da1f2; color: white; width: 100%; padding: 15px; font-size: 16px; margin-top: 5px; }
+        .fix-btn { background: #f5a623; color: white; width: 100%; padding: 10px; margin-bottom: 15px; }
         .del-btn { background: #e0245e; color: white; }
         .edit-btn { background: #17bf63; color: white; margin-right: 5px; }
         .save-btn { background: #ffffff; color: #15202b; width: 100%; margin-top: 10px; padding: 10px; }
-        .report-item { background: #192734; padding: 15px; margin-bottom: 12px; border-radius: 12px; border: 1px solid #38444d; text-align: left; box-sizing: border-box; }
-        .item-info { font-size: 11px; color: #8899a6; margin-bottom: 5px; }
+        .report-item { background: #192734; padding: 15px; margin-bottom: 12px; border-radius: 12px; border: 1px solid #38444d; text-align: left; }
         .item-name { font-weight: bold; font-size: 15px; margin-bottom: 5px; color: #fff; }
         .item-url { font-size: 12px; color: #1da1f2; margin-bottom: 12px; word-break: break-all; }
         .edit-mode { display: none; margin-top: 10px; border-top: 1px solid #38444d; padding-top: 10px; }
         .controls { display: flex; justify-content: flex-end; }
-        #searchBar { border: 2px solid #1da1f2; }
         .loading { opacity: 0.5; pointer-events: none; }
     </style>
 </head>
@@ -44,8 +43,8 @@
 </div>
 
 <div id="listPage" class="container" style="display:none;">
-    <input type="text" id="searchBar" placeholder="名前・ID検索" 
-           oninput="renderList()" onchange="renderList()" onblur="renderList()" oncompositionend="renderList()">
+    <button class="btn fix-btn" onclick="autoRepairNames()">名前のバラつきを強制修復する</button>
+    <input type="text" id="searchBar" placeholder="名前・ID検索" oninput="renderList()">
     <div id="reportList" style="margin-top:15px;">読込中...</div>
 </div>
 
@@ -61,37 +60,47 @@
     function showPage(p) {
         document.getElementById('addPage').style.display = p === 'add' ? 'block' : 'none';
         document.getElementById('listPage').style.display = p === 'list' ? 'block' : 'none';
-        document.getElementById('nav-add').classList.toggle('active', p === 'add');
-        document.getElementById('nav-list').classList.toggle('active', p === 'list');
         if(p === 'list') loadCloudData();
     }
 
     function extractId(url) {
-        if(!url) return "不明";
-        const match = url.match(/(?:x|twitter)\.com\/(?:intent\/user\?screen_name=)?([^\/\?\s&]+)/i);
-        return match ? match[1] : "不明";
+        const m = url.match(/(?:x|twitter)\.com\/(?:intent\/user\?screen_name=)?([^\/\?\s&]+)/i);
+        return m ? m[1] : "不明";
     }
 
-    // 名前を一括で強制同期する関数
-    function forceSyncNames(targetId, newName) {
-        return new Promise((resolve) => {
-            const tx = db.transaction("meta", "readwrite");
-            const store = tx.objectStore("meta");
-            const request = store.openCursor();
-            request.onsuccess = (e) => {
-                const cursor = e.target.result;
-                if (cursor) {
-                    if (cursor.value.id === targetId) {
-                        const data = cursor.value;
-                        data.name = newName;
-                        cursor.update(data);
+    async function autoRepairNames() {
+        if(!confirm("同じIDで名前が違うものを、一番新しい名前に統一しますか？")) return;
+        document.body.classList.add('loading');
+        
+        const tx = db.transaction("meta", "readwrite");
+        const store = tx.objectStore("meta");
+        const allData = [];
+        
+        const cursorRequest = store.openCursor();
+        cursorRequest.onsuccess = (e) => {
+            const cursor = e.target.result;
+            if (cursor) {
+                allData.push(cursor.value);
+                cursor.continue();
+            } else {
+                // 名前マッピング作成（IDごとに最新の名前を探す）
+                const nameMap = {};
+                allData.sort((a,b) => (b.time || "").localeCompare(a.time || "")).forEach(d => {
+                    if(!nameMap[d.id] && d.name) nameMap[d.id] = d.name;
+                });
+                
+                // 再度スキャンして上書き
+                allData.forEach(d => {
+                    if(nameMap[d.id] && d.name !== nameMap[d.id]) {
+                        d.name = nameMap[d.id];
+                        store.put(d);
                     }
-                    cursor.continue();
-                } else {
-                    resolve();
-                }
-            };
-        });
+                });
+                alert("修復完了");
+                renderList();
+                document.body.classList.remove('loading');
+            }
+        };
     }
 
     async function register() {
@@ -102,22 +111,28 @@
         if(!url) return;
 
         document.body.classList.add('loading');
-        try {
-            await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
-            
-            // 1. まず現在のURLのデータを保存
-            const tx = db.transaction("meta", "readwrite");
-            await tx.objectStore("meta").put({ url, name, id, time });
-            
-            // 2. 名前が入力されていれば、全データをスキャンして強制同期
-            if (name) {
-                await forceSyncNames(id, name);
+        await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
+        
+        const tx = db.transaction("meta", "readwrite");
+        const store = tx.objectStore("meta");
+        await store.put({ url, name, id, time });
+        
+        // 追加時に即時、既存の同じIDの名前を塗り替える
+        const req = store.openCursor();
+        req.onsuccess = (e) => {
+            const cursor = e.target.result;
+            if(cursor) {
+                if(cursor.value.id === id) {
+                    const d = cursor.value;
+                    d.name = name;
+                    cursor.update(d);
+                }
+                cursor.continue();
+            } else {
+                alert("登録完了");
+                document.body.classList.remove('loading');
             }
-            
-            alert("登録完了");
-            ["urlInput","nameInput","timeInput"].forEach(i => document.getElementById(i).value="");
-        } catch (e) { alert("エラー"); }
-        document.body.classList.remove('loading');
+        };
     }
 
     async function loadCloudData() {
@@ -135,21 +150,17 @@
         const allMeta = await Promise.all(cloudUrls.map(url => {
             return new Promise(resolve => {
                 const req = store.get(url);
-                req.onsuccess = () => {
-                    const meta = req.result || { name: '', time: '', id: extractId(url) };
-                    resolve({ url, ...meta });
-                };
+                req.onsuccess = () => resolve({ url, ...(req.result || { name: '', time: '', id: extractId(url) }) });
             });
         }));
 
         listDiv.innerHTML = '';
-        allMeta.sort((a, b) => (b.time || "").localeCompare(a.time || "") || 1).forEach((d, i) => {
+        allMeta.sort((a,b) => (b.time || "").localeCompare(a.time || "") || 1).forEach((d, i) => {
             if (!d.name.toLowerCase().includes(q) && !d.id.toLowerCase().includes(q)) return;
-
             const item = document.createElement('div');
             item.className = 'report-item';
             item.innerHTML = `
-                <div class="item-info">@${d.id} | ${d.time ? d.time.replace('T', ' ') : '日時なし'}</div>
+                <div style="font-size:11px; color:#8899a6;">@${d.id} | ${d.time ? d.time.replace('T', ' ') : '日時なし'}</div>
                 <div class="item-name">${d.name || '(名前未設定)'}</div>
                 <div class="item-url">${d.url}</div>
                 <div class="controls">
@@ -159,7 +170,7 @@
                 <div id="edit-${i}" class="edit-mode">
                     <input type="text" id="en-${i}" value="${d.name}">
                     <input type="datetime-local" id="et-${i}" value="${d.time}">
-                    <button class="btn save-btn" onclick="updateMeta('${d.url.replace(/'/g, "\\'")}', ${i}, '${d.id}')">このIDの情報を一括更新</button>
+                    <button class="btn save-btn" onclick="updateMeta('${d.url.replace(/'/g, "\\'")}', ${i}, '${d.id}')">このIDを同期保存</button>
                 </div>
             `;
             listDiv.appendChild(item);
@@ -174,28 +185,33 @@
     async function updateMeta(url, i, id) {
         const n = document.getElementById(`en-${i}`).value;
         const t = document.getElementById(`et-${i}`).value;
-        document.body.classList.add('loading');
-        
-        // 全スキャン同期
-        await forceSyncNames(id, n);
-        
-        // 編集した行の個別保存
         const tx = db.transaction("meta", "readwrite");
-        await tx.objectStore("meta").put({ url, name: n, id, time: t });
+        const store = tx.objectStore("meta");
         
-        await renderList();
-        alert("一括更新完了");
-        document.body.classList.remove('loading');
+        const req = store.openCursor();
+        req.onsuccess = (e) => {
+            const cursor = e.target.result;
+            if(cursor) {
+                if(cursor.value.id === id) {
+                    const d = cursor.value;
+                    d.name = n;
+                    cursor.update(d);
+                }
+                cursor.continue();
+            } else {
+                store.put({ url, name: n, id, time: t });
+                renderList();
+                alert("完了");
+            }
+        };
     }
 
     async function deleteItem(url) {
-        if(!confirm("削除しますか？")) return;
-        document.body.classList.add('loading');
+        if(!confirm("削除？")) return;
         await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
         const tx = db.transaction("meta", "readwrite");
         await tx.objectStore("meta").delete(url);
-        await loadCloudData();
-        document.body.classList.remove('loading');
+        loadCloudData();
     }
 </script>
 </body>
