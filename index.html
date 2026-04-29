@@ -16,6 +16,7 @@
         .report-item { background: #192734; padding: 15px; margin-bottom: 12px; border-radius: 12px; border: 1px solid #38444d; text-align: left; }
         .item-id { font-weight: bold; font-size: 16px; color: #1da1f2; }
         .item-info { font-size: 11px; color: #8899a6; margin: 5px 0; }
+        .del-btn { background: #e0245e; color: white; border: none; border-radius: 20px; padding: 5px 12px; font-size: 12px; font-weight: bold; cursor: pointer; }
         .loading { opacity: 0.5; pointer-events: none; }
     </style>
 </head>
@@ -41,7 +42,9 @@
 </div>
 
 <script>
-    const apiURL = 'https://script.google.com/macros/s/AKfycbwNMIqyjChPN5ckansj4zEcv-fEF9G6jnIOrdopZTCLOMMSRH5pZTEpS4U7-7-IJG2s/exec';
+    // ★ここを、さっきゲットしたGASのURL（https://.../exec）に書き換えてください
+    const apiURL = 'https://script.google.com/macros/s/AKfycbxFDKluZz2nOvYOerxhzTQP5jEzjFf9Dot9kStebCVvr2qOeX8xdvfBjg-pMdif6B7y/exec';
+
     let db;
     let cloudUrls = [];
 
@@ -52,7 +55,18 @@
     function showPage(p) {
         document.getElementById('addPage').style.display = p === 'add' ? 'block' : 'none';
         document.getElementById('listPage').style.display = p === 'list' ? 'block' : 'none';
-        if(p === 'list') loadCloudData();
+        
+        const nAdd = document.getElementById('n-add');
+        const nList = document.getElementById('n-list');
+        
+        if(p === 'list') {
+            nAdd.classList.remove('active');
+            nList.classList.add('active');
+            loadCloudData();
+        } else {
+            nAdd.classList.add('active');
+            nList.classList.remove('active');
+        }
     }
 
     async function register() {
@@ -61,16 +75,12 @@
         const btn = document.getElementById('submitBtn');
         if(!url) return;
 
-        const isExisting = cloudUrls.includes(url);
-
         btn.disabled = true;
         document.body.classList.add('loading');
 
         try {
-            if (!isExisting) {
-                await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
-            }
-
+            await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
+            
             const tx = db.transaction("meta", "readwrite");
             await tx.objectStore("meta").put({ 
                 url, 
@@ -78,11 +88,11 @@
                 time 
             });
 
-            alert(isExisting ? "手元の日時を更新しました" : "登録しました");
+            alert("登録しました");
             document.getElementById('urlInput').value = "";
             loadCloudData();
         } catch (e) {
-            alert("エラー");
+            alert("登録エラー");
         } finally {
             btn.disabled = false;
             document.body.classList.remove('loading');
@@ -114,9 +124,34 @@
             const item = document.createElement('div');
             item.className = 'report-item';
             const t = d.time ? `日時: ${d.time.replace('T', ' ')}` : '日時未設定';
-            item.innerHTML = `<div class="item-id">${d.id}</div><div class="item-info">${t}</div><div style="font-size:10px;opacity:0.5;word-break:break-all;">${u}</div>`;
+            item.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:start;">
+                    <div style="flex:1;">
+                        <div class="item-id">${d.id}</div>
+                        <div class="item-info">${t}</div>
+                        <div style="font-size:10px;opacity:0.5;word-break:break-all;">${u}</div>
+                    </div>
+                    <button class="del-btn" onclick="deleteItem('${u}')">削除</button>
+                </div>`;
             listDiv.appendChild(item);
         });
+    }
+
+    async function deleteItem(url) {
+        if(!confirm("削除しますか？")) return;
+        document.body.classList.add('loading');
+        try {
+            await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
+            const tx = db.transaction("meta", "readwrite");
+            await tx.objectStore("meta").delete(url);
+            
+            alert("削除しました");
+            loadCloudData();
+        } catch (e) {
+            alert("削除エラー");
+        } finally {
+            document.body.classList.remove('loading');
+        }
     }
 </script>
 </body>
