@@ -42,7 +42,7 @@
 </div>
 
 <script>
-    // ★ここを、さっきゲットしたGASのURL（https://.../exec）に書き換えてください
+    // ★自分のGASのURLを入れるのを忘れないでね！
     const apiURL = 'https://script.google.com/macros/s/AKfycbxFDKluZz2nOvYOerxhzTQP5jEzjFf9Dot9kStebCVvr2qOeX8xdvfBjg-pMdif6B7y/exec';
 
     let db;
@@ -52,13 +52,17 @@
     request.onupgradeneeded = e => e.target.result.createObjectStore("meta", { keyPath: "url" });
     request.onsuccess = e => { db = e.target.result; loadCloudData(); };
 
+    // URLからIDをその場で抜き出す魔法の関数
+    function extractId(url) {
+        const match = url.match(/https?:\/\/(?:x|twitter)\.com\/([^\/\s\?]+)/);
+        return match && match[1] ? '@' + match[1] : "不明";
+    }
+
     function showPage(p) {
         document.getElementById('addPage').style.display = p === 'add' ? 'block' : 'none';
         document.getElementById('listPage').style.display = p === 'list' ? 'block' : 'none';
-        
         const nAdd = document.getElementById('n-add');
         const nList = document.getElementById('n-list');
-        
         if(p === 'list') {
             nAdd.classList.remove('active');
             nList.classList.add('active');
@@ -74,26 +78,16 @@
         const time = document.getElementById('timeInput').value;
         const btn = document.getElementById('submitBtn');
         if(!url) return;
-
         btn.disabled = true;
         document.body.classList.add('loading');
-
         try {
             await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
-            
             const tx = db.transaction("meta", "readwrite");
-            await tx.objectStore("meta").put({ 
-                url, 
-                id: url.split('/')[3] || "@不明", 
-                time 
-            });
-
+            await tx.objectStore("meta").put({ url, time }); // IDは保存せず、表示時に計算する
             alert("登録しました");
             document.getElementById('urlInput').value = "";
             loadCloudData();
-        } catch (e) {
-            alert("登録エラー");
-        } finally {
+        } catch (e) { alert("登録エラー"); } finally {
             btn.disabled = false;
             document.body.classList.remove('loading');
         }
@@ -120,14 +114,18 @@
 
         listDiv.innerHTML = '';
         [...new Set(cloudUrls)].forEach(u => {
-            const d = allLocal.find(l => l.url === u) || { url: u, id: "@不明", time: '' };
+            const d = allLocal.find(l => l.url === u) || { url: u, time: '' };
             const item = document.createElement('div');
             item.className = 'report-item';
             const t = d.time ? `日時: ${d.time.replace('T', ' ')}` : '日時未設定';
+            
+            // ★ ここがポイント！保存されたデータではなく、URLからその場でIDを計算して出す
+            const displayId = extractId(u);
+
             item.innerHTML = `
                 <div style="display:flex; justify-content:space-between; align-items:start;">
                     <div style="flex:1;">
-                        <div class="item-id">${d.id}</div>
+                        <div class="item-id">${displayId}</div>
                         <div class="item-info">${t}</div>
                         <div style="font-size:10px;opacity:0.5;word-break:break-all;">${u}</div>
                     </div>
@@ -144,12 +142,9 @@
             await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
             const tx = db.transaction("meta", "readwrite");
             await tx.objectStore("meta").delete(url);
-            
             alert("削除しました");
             loadCloudData();
-        } catch (e) {
-            alert("削除エラー");
-        } finally {
+        } catch (e) { alert("削除エラー"); } finally {
             document.body.classList.remove('loading');
         }
     }
