@@ -17,13 +17,13 @@
         .del-btn { background: #e0245e; color: white; }
         .edit-btn { background: #17bf63; color: white; margin-right: 5px; }
         .save-btn { background: #ffffff; color: #15202b; width: 100%; margin-top: 10px; padding: 10px; }
-        .report-item { background: #192734; padding: 15px; margin-bottom: 12px; border-radius: 12px; border: 1px solid #38444d; text-align: left; box-sizing: border-box; overflow: hidden; }
-        .item-info { font-size: 11px; color: #8899a6; margin-bottom: 5px; overflow-wrap: break-word; }
+        .report-item { background: #192734; padding: 15px; margin-bottom: 12px; border-radius: 12px; border: 1px solid #38444d; text-align: left; box-sizing: border-box; }
+        .item-info { font-size: 11px; color: #8899a6; margin-bottom: 5px; }
         .item-name { font-weight: bold; font-size: 15px; margin-bottom: 5px; color: #fff; }
-        .item-url { font-size: 12px; color: #1da1f2; margin-bottom: 12px; word-break: break-all; line-height: 1.4; }
+        .item-url { font-size: 12px; color: #1da1f2; margin-bottom: 12px; word-break: break-all; }
         .edit-mode { display: none; margin-top: 10px; border-top: 1px solid #38444d; padding-top: 10px; }
-        .controls { display: flex; justify-content: flex-end; align-items: center; }
-        #searchBar { border: 2px solid #1da1f2; margin-top: 10px; }
+        .controls { display: flex; justify-content: flex-end; }
+        #searchBar { border: 2px solid #1da1f2; }
         .loading { opacity: 0.5; pointer-events: none; }
     </style>
 </head>
@@ -45,10 +45,8 @@
 
 <div id="listPage" class="container" style="display:none;">
     <input type="text" id="searchBar" placeholder="名前・ID検索" 
-        oninput="renderList()" 
-        onchange="renderList()" 
-        oncompositionend="renderList()">
-    <div id="reportList">読込中...</div>
+           oninput="renderList()" onchange="renderList()" onblur="renderList()" oncompositionend="renderList()">
+    <div id="reportList" style="margin-top:15px;">読込中...</div>
 </div>
 
 <script>
@@ -74,15 +72,16 @@
         return match ? match[1] : "不明";
     }
 
-    function syncNamesInDB(id, newName) {
+    // 名前を一括で強制同期する関数
+    function forceSyncNames(targetId, newName) {
         return new Promise((resolve) => {
             const tx = db.transaction("meta", "readwrite");
             const store = tx.objectStore("meta");
-            const req = store.openCursor();
-            req.onsuccess = (e) => {
+            const request = store.openCursor();
+            request.onsuccess = (e) => {
                 const cursor = e.target.result;
                 if (cursor) {
-                    if (cursor.value.id === id) {
+                    if (cursor.value.id === targetId) {
                         const data = cursor.value;
                         data.name = newName;
                         cursor.update(data);
@@ -105,9 +104,16 @@
         document.body.classList.add('loading');
         try {
             await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
-            if (name) await syncNamesInDB(id, name);
+            
+            // 1. まず現在のURLのデータを保存
             const tx = db.transaction("meta", "readwrite");
             await tx.objectStore("meta").put({ url, name, id, time });
+            
+            // 2. 名前が入力されていれば、全データをスキャンして強制同期
+            if (name) {
+                await forceSyncNames(id, name);
+            }
+            
             alert("登録完了");
             ["urlInput","nameInput","timeInput"].forEach(i => document.getElementById(i).value="");
         } catch (e) { alert("エラー"); }
@@ -123,7 +129,6 @@
     async function renderList() {
         const q = document.getElementById('searchBar').value.toLowerCase();
         const listDiv = document.getElementById('reportList');
-        
         const tx = db.transaction("meta", "readonly");
         const store = tx.objectStore("meta");
 
@@ -154,7 +159,7 @@
                 <div id="edit-${i}" class="edit-mode">
                     <input type="text" id="en-${i}" value="${d.name}">
                     <input type="datetime-local" id="et-${i}" value="${d.time}">
-                    <button class="btn save-btn" onclick="updateMeta('${d.url.replace(/'/g, "\\'")}', ${i}, '${d.id}')">一括更新</button>
+                    <button class="btn save-btn" onclick="updateMeta('${d.url.replace(/'/g, "\\'")}', ${i}, '${d.id}')">このIDの情報を一括更新</button>
                 </div>
             `;
             listDiv.appendChild(item);
@@ -170,16 +175,21 @@
         const n = document.getElementById(`en-${i}`).value;
         const t = document.getElementById(`et-${i}`).value;
         document.body.classList.add('loading');
-        await syncNamesInDB(id, n);
+        
+        // 全スキャン同期
+        await forceSyncNames(id, n);
+        
+        // 編集した行の個別保存
         const tx = db.transaction("meta", "readwrite");
         await tx.objectStore("meta").put({ url, name: n, id, time: t });
+        
         await renderList();
-        alert("完了");
+        alert("一括更新完了");
         document.body.classList.remove('loading');
     }
 
     async function deleteItem(url) {
-        if(!confirm("削除？")) return;
+        if(!confirm("削除しますか？")) return;
         document.body.classList.add('loading');
         await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
         const tx = db.transaction("meta", "readwrite");
