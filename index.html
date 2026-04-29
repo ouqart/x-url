@@ -11,22 +11,25 @@
         .nav-item.active { background: white; color: #1da1f2; }
         .container { max-width: 500px; margin: auto; padding: 20px; }
         .input-card { background: #192734; padding: 20px; border-radius: 15px; border: 1px solid #38444d; margin-bottom: 20px; text-align: left; }
-        input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 14px; margin-bottom: 10px; box-sizing: border-box; }
-        .btn { border: none; padding: 12px; border-radius: 30px; font-weight: bold; cursor: pointer; width: 100%; font-size: 14px; transition: 0.2s; }
-        .add-btn { background: #1da1f2; color: white; }
-        .del-btn { background: #e0245e; color: white; margin-top: 5px; }
-        .edit-btn { background: #17bf63; color: white; margin-top: 5px; }
+        input { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 14px; margin-bottom: 10px; box-sizing: border-box; }
+        .btn { border: none; padding: 10px; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 13px; transition: 0.2s; }
+        .add-btn { background: #1da1f2; color: white; width: 100%; padding: 15px; font-size: 16px; }
+        .del-btn { background: #e0245e; color: white; padding: 5px 12px; }
+        .edit-btn { background: #17bf63; color: white; padding: 5px 12px; margin-right: 5px; }
+        .save-btn { background: #ffffff; color: #15202b; padding: 5px 12px; margin-top: 5px; }
         .report-item { background: #192734; padding: 15px; margin-bottom: 10px; border-radius: 10px; border: 1px solid #38444d; text-align: left; }
-        .loading { opacity: 0.5; pointer-events: none; }
+        .item-info { font-size: 11px; color: #8899a6; margin-bottom: 5px; }
+        .item-url { font-size: 13px; color: #1da1f2; margin-bottom: 8px; word-break: break-all; }
+        .edit-mode { display: none; margin-top: 10px; border-top: 1px dashed #38444d; padding-top: 10px; }
         #searchBar { border: 2px solid #1da1f2; margin-bottom: 20px; }
-        .edit-area { margin-top: 10px; padding-top: 10px; border-top: 1px solid #38444d; }
+        .loading { opacity: 0.5; pointer-events: none; }
     </style>
 </head>
 <body>
 
 <div class="nav">
     <div id="nav-add" class="nav-item active" onclick="showPage('add')">追加</div>
-    <div id="nav-list" class="nav-item" onclick="showPage('list')">リスト編集・削除</div>
+    <div id="nav-list" class="nav-item" onclick="showPage('list')">リスト編集</div>
 </div>
 
 <div id="addPage" class="container">
@@ -34,13 +37,13 @@
         <input type="text" id="urlInput" placeholder="URL">
         <input type="text" id="nameInput" placeholder="ユーザー名">
         <input type="datetime-local" id="timeInput">
-        <button id="addBtn" class="btn add-btn" onclick="checkAndSend()">リストに追加</button>
+        <button id="addBtn" class="btn add-btn" onclick="checkAndSend()">登録</button>
     </div>
 </div>
 
 <div id="listPage" class="container" style="display:none;">
     <input type="text" id="searchBar" placeholder="名前・ID検索" oninput="renderReports()">
-    <div id="reportList"></div>
+    <div id="reportList">読み込み中...</div>
 </div>
 
 <script>
@@ -56,16 +59,18 @@
         if(page === 'list') loadReports();
     }
 
+    function extractId(url) {
+        const m = url.match(/(?:x|twitter)\.com\/(?:intent\/user\?screen_name=)?([^\/\?\s&]+)/);
+        return m ? m[1] : '不明';
+    }
+
     async function checkAndSend() {
         const url = document.getElementById('urlInput').value.trim();
         const name = document.getElementById('nameInput').value.trim();
         const time = document.getElementById('timeInput').value;
-        const idMatch = url.match(/(?:x|twitter)\.com\/([^\/\?]+)/);
-        const id = idMatch ? idMatch[1] : '不明';
+        const id = extractId(url);
 
         if(!url) return alert('URLなし');
-        if (currentLinks.some(l => l.raw.includes(url))) return alert('重複');
-
         const composite = `${url}${SEP}${name}${SEP}${id}${SEP}${time}`;
         sendAction('add', composite);
     }
@@ -73,18 +78,14 @@
     async function sendAction(type, value, oldRaw = null) {
         document.body.classList.add('loading');
         try {
-            // 編集の場合は、古いデータを消してから新しいデータを追加する
-            if(type === 'update' && oldRaw) {
+            if(type === 'update') {
                 await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(oldRaw)}`, { mode: 'no-cors' });
                 await fetch(`${apiURL}?action=add&url=${encodeURIComponent(value)}`, { mode: 'no-cors' });
             } else {
                 await fetch(`${apiURL}?action=${type}&url=${encodeURIComponent(value)}`, { mode: 'no-cors' });
             }
-            if(type !== 'get') {
-                alert('完了');
-                ["urlInput","nameInput","timeInput"].forEach(i => document.getElementById(i).value = "");
-                loadReports();
-            }
+            alert('完了');
+            loadReports();
         } catch (e) { alert('エラー'); }
         document.body.classList.remove('loading');
     }
@@ -92,58 +93,51 @@
     async function loadReports() {
         const res = await fetch(`${apiURL}?action=getReports`);
         const data = await res.json();
-        
-        currentLinks = data.map((raw, index) => {
-            const parts = raw.split(SEP);
-            const idMatch = raw.match(/(?:x|twitter)\.com\/([^\/\?]+)/);
-            return {
-                raw: raw,
-                index: index,
-                url: parts[0] || raw,
-                name: parts[1] || '',
-                id: parts[2] || (idMatch ? idMatch[1] : '不明'),
-                time: parts[3] || ''
-            };
-        });
-
-        currentLinks.sort((a, b) => {
-            if (a.time && b.time) return b.time.localeCompare(a.time);
-            return b.index - a.index;
-        });
-
+        currentLinks = data.map((raw, i) => {
+            const p = raw.split(SEP);
+            const id = p[2] && p[2] !== '不明' ? p[2] : extractId(p[0] || raw);
+            return { raw: raw, idx: i, url: p[0] || raw, name: p[1] || '', id: id, time: p[3] || '' };
+        }).sort((a, b) => (b.time && a.time) ? b.time.localeCompare(a.time) : b.idx - a.idx);
         renderReports();
     }
 
     function renderReports() {
-        const query = document.getElementById('searchBar').value.toLowerCase();
+        const q = document.getElementById('searchBar').value.toLowerCase();
         const listDiv = document.getElementById('reportList');
         listDiv.innerHTML = '';
 
         currentLinks.forEach(d => {
-            if (!d.name.toLowerCase().includes(query) && !d.id.toLowerCase().includes(query)) return;
-
+            if (!d.name.toLowerCase().includes(q) && !d.id.toLowerCase().includes(q)) return;
             const item = document.createElement('div');
             item.className = 'report-item';
             item.innerHTML = `
-                <div style="font-size:11px; color:#8899a6; margin-bottom:5px;">ID: @${d.id} | ${d.time || '日時不明'}</div>
-                <div style="font-size:14px; margin-bottom:10px; word-break:break-all;">${d.url}</div>
-                <div class="edit-area">
-                    <input type="text" value="${d.name}" placeholder="ユーザー名" id="editName-${d.index}">
-                    <input type="datetime-local" value="${d.time}" id="editTime-${d.index}">
-                    <button class="btn edit-btn" onclick="updateItem(${d.index})">保存</button>
+                <div class="item-info">@${d.id} | ${d.time || '日時なし'}</div>
+                <div style="font-weight:bold; font-size:14px; margin-bottom:5px;">${d.name || '(名前なし)'}</div>
+                <div class="item-url">${d.url}</div>
+                <div style="text-align:right;">
+                    <button class="btn edit-btn" onclick="toggleEdit(${d.idx})">編集</button>
                     <button class="btn del-btn" onclick="sendAction('delete', '${d.raw.replace(/'/g, "\\'")}')">削除</button>
+                </div>
+                <div id="editBox-${d.idx}" class="edit-mode">
+                    <input type="text" value="${d.name}" id="en-${d.idx}" placeholder="名前">
+                    <input type="datetime-local" value="${d.time}" id="et-${d.idx}">
+                    <button class="btn save-btn" onclick="saveEdit(${d.idx})">この内容で更新</button>
                 </div>
             `;
             listDiv.appendChild(item);
         });
     }
 
-    function updateItem(index) {
-        const item = currentLinks.find(l => l.index === index);
-        const newName = document.getElementById(`editName-${index}`).value;
-        const newTime = document.getElementById(`editTime-${index}`).value;
-        const newRaw = `${item.url}${SEP}${newName}${SEP}${item.id}${SEP}${newTime}`;
-        sendAction('update', newRaw, item.raw);
+    function toggleEdit(i) {
+        const box = document.getElementById(`editBox-${i}`);
+        box.style.display = box.style.display === 'block' ? 'none' : 'block';
+    }
+
+    function saveEdit(i) {
+        const d = currentLinks.find(l => l.idx === i);
+        const n = document.getElementById(`en-${i}`).value;
+        const t = document.getElementById(`et-${i}`).value;
+        sendAction('update', `${d.url}${SEP}${n}${SEP}${d.id}${SEP}${t}`, d.raw);
     }
 
     loadReports();
