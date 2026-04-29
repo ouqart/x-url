@@ -71,6 +71,12 @@
         const id = extractId(url);
 
         if(!url) return alert('URLなし');
+        
+        // 追加時に同じIDがあれば、その名前を今回の名前に合わせる（一括更新処理を走らせる）
+        if (name) {
+            await syncNamesById(id, name);
+        }
+
         const composite = `${url}${SEP}${name}${SEP}${id}${SEP}${time}`;
         sendAction('add', composite);
     }
@@ -84,7 +90,7 @@
             } else {
                 await fetch(`${apiURL}?action=${type}&url=${encodeURIComponent(value)}`, { mode: 'no-cors' });
             }
-            alert('完了');
+            if (type !== 'sync') alert('完了');
             loadReports();
         } catch (e) { alert('エラー'); }
         document.body.classList.remove('loading');
@@ -121,7 +127,7 @@
                 <div id="editBox-${d.idx}" class="edit-mode">
                     <input type="text" value="${d.name}" id="en-${d.idx}" placeholder="名前">
                     <input type="datetime-local" value="${d.time}" id="et-${d.idx}">
-                    <button class="btn save-btn" onclick="saveEdit(${d.idx})">この内容で更新</button>
+                    <button class="btn save-btn" onclick="saveEdit(${d.idx})">このIDの全データを更新</button>
                 </div>
             `;
             listDiv.appendChild(item);
@@ -133,10 +139,30 @@
         box.style.display = box.style.display === 'block' ? 'none' : 'block';
     }
 
-    function saveEdit(i) {
+    // 特定のIDを持つ全てのURLの名前を一括で書き換える関数
+    async function syncNamesById(targetId, newName) {
+        const targets = currentLinks.filter(l => l.id === targetId && l.name !== newName);
+        if (targets.length === 0) return;
+
+        document.body.classList.add('loading');
+        for (const item of targets) {
+            const updatedRaw = `${item.url}${SEP}${newName}${SEP}${item.id}${SEP}${item.time}`;
+            await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(item.raw)}`, { mode: 'no-cors' });
+            await fetch(`${apiURL}?action=add&url=${encodeURIComponent(updatedRaw)}`, { mode: 'no-cors' });
+        }
+    }
+
+    async function saveEdit(i) {
         const d = currentLinks.find(l => l.idx === i);
         const n = document.getElementById(`en-${i}`).value;
         const t = document.getElementById(`et-${i}`).value;
+        
+        // 編集時：名前が変更されていたら、同じIDの他データも全て更新
+        if (n !== d.name) {
+            await syncNamesById(d.id, n);
+        }
+        
+        // 今回の編集対象のデータを更新（日時の変更などもあるため）
         sendAction('update', `${d.url}${SEP}${n}${SEP}${d.id}${SEP}${t}`, d.raw);
     }
 
