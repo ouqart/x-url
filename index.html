@@ -10,43 +10,42 @@
         .nav-item { cursor: pointer; font-weight: bold; font-size: 14px; padding: 5px 15px; border-radius: 20px; }
         .nav-item.active { background: white; color: #1da1f2; }
         .container { max-width: 500px; margin: auto; padding: 20px; }
-        
-        .input-card { background: #192734; padding: 20px; border-radius: 15px; border: 1px solid #38444d; margin-bottom: 20px; margin-top: 10px; }
-        input { width: 90%; padding: 12px; border-radius: 10px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 16px; margin-bottom: 15px; }
-        
+        .input-card { background: #192734; padding: 20px; border-radius: 15px; border: 1px solid #38444d; margin-bottom: 20px; text-align: left; }
+        input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 16px; margin-bottom: 10px; box-sizing: border-box; }
         .btn { border: none; padding: 15px; border-radius: 30px; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; transition: 0.2s; }
         .add-btn { background: #1da1f2; color: white; }
-        .del-btn { background: #e0245e; color: white; margin-top: 10px; }
-        
-        .report-item { background: #192734; padding: 15px; margin-bottom: 10px; border-radius: 10px; border: 1px solid #38444d; text-align: left; word-break: break-all; }
+        .del-btn { background: #e0245e; color: white; }
+        .report-item { background: #192734; padding: 15px; margin-bottom: 10px; border-radius: 10px; border: 1px solid #38444d; text-align: left; }
         .loading { opacity: 0.5; pointer-events: none; }
+        #searchBar { border: 2px solid #1da1f2; margin-bottom: 20px; sticky: top; }
+        .user-badge { background: #38444d; padding: 2px 8px; border-radius: 5px; font-size: 12px; color: #1da1f2; margin-right: 5px; }
     </style>
 </head>
 <body>
 
 <div class="nav">
     <div id="nav-add" class="nav-item active" onclick="showPage('add')">追加</div>
-    <div id="nav-list" class="nav-item" onclick="showPage('list')">削除・確認</div>
+    <div id="nav-list" class="nav-item" onclick="showPage('list')">削除・検索</div>
 </div>
 
 <div id="addPage" class="container">
     <div class="input-card">
-        <p style="margin-top:0;">通報するツイートのURLを貼り付け</p>
-        <input type="text" id="urlInput" placeholder="https://x.com/...">
-        <button id="addBtn" class="btn add-btn" onclick="checkAndSend()">通報リストに追加する</button>
+        <input type="text" id="urlInput" placeholder="URL (https://x.com/...)">
+        <input type="text" id="nameInput" placeholder="ユーザー名">
+        <input type="text" id="idInput" placeholder="ユーザーID (@...)">
+        <input type="datetime-local" id="timeInput">
+        <button id="addBtn" class="btn add-btn" onclick="checkAndSend()">通報リストに追加</button>
     </div>
-    <p style="color: #8899a6; font-size: 12px;">※重複チェック機能付き</p>
 </div>
 
 <div id="listPage" class="container" style="display:none;">
-    <h3>現在の通報リスト</h3>
+    <input type="text" id="searchBar" placeholder="名前やIDで検索..." oninput="renderReports()">
     <div id="reportList">読み込み中...</div>
 </div>
 
 <script>
     const apiURL = 'https://script.google.com/macros/s/AKfycbwNMIqyjChPN5ckansj4zEcv-fEF9G6jnIOrdopZTCLOMMSRH5pZTEpS4U7-7-IJG2s/exec';
-
-    // 💡 サーバー上の最新リストを保持する変数
+    const SEP = '[SEP]';
     let currentLinks = [];
 
     function showPage(page) {
@@ -57,79 +56,65 @@
         if(page === 'list') loadReports();
     }
 
-    // 💡 追加ボタンを押した時にまず重複をチェックする関数
     async function checkAndSend() {
-        const input = document.getElementById('urlInput');
-        const url = input.value.trim();
-        if(!url) return alert('URLを入力してください');
+        const url = document.getElementById('urlInput').value.trim();
+        const name = document.getElementById('nameInput').value.trim() || '不明';
+        const id = document.getElementById('idInput').value.trim() || '不明';
+        const time = document.getElementById('timeInput').value || '-';
 
-        // 最新のリストに同じURLが含まれているかチェック
-        if (currentLinks.includes(url)) {
-            alert('⚠️ このリンクは既に追加されています！\n(重複しているため送信しません)');
-            return; // ここで終了して送信させない
-        }
+        if(!url) return alert('URLは必須です');
+        if (currentLinks.some(link => link.includes(url))) return alert('既に存在します');
 
-        // 重複がなければ送信
-        sendAction('add', url);
+        const composite = `${url}${SEP}${name}${SEP}${id}${SEP}${time}`;
+        sendAction('add', composite);
     }
 
-    async function sendAction(type, urlValue) {
-        const input = document.getElementById('urlInput');
-        const url = urlValue || input.value.trim();
-        if(!url) return alert('URLを入力してください');
-
+    async function sendAction(type, value) {
         document.body.classList.add('loading');
         try {
-            // mode: 'no-cors' だと成功したか判定できないため、念のため少し待つかリロード
-            await fetch(`${apiURL}?action=${type}&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
-            alert(type === 'add' ? '追加完了！' : '削除完了！');
-            input.value = '';
-            
-            // 💡 追加/削除が終わったら手元のリストも更新する
-            await loadReportsSilent(); 
-
-            if(type === 'delete') loadReports();
-        } catch (e) {
-            alert('エラーが発生しました');
-        }
+            await fetch(`${apiURL}?action=${type}&url=${encodeURIComponent(value)}`, { mode: 'no-cors' });
+            alert('完了');
+            if(type === 'add') ["urlInput","nameInput","idInput","timeInput"].forEach(i => document.getElementById(i).value = "");
+            loadReports();
+        } catch (e) { alert('エラー'); }
         document.body.classList.remove('loading');
     }
 
-    // 💡 画面には出さずに裏でリストを更新する
-    async function loadReportsSilent() {
+    async function loadReports() {
         try {
             const res = await fetch(`${apiURL}?action=getReports`);
             currentLinks = await res.json();
-        } catch (e) {
-            console.log("リストの事前読み込みに失敗しました");
-        }
+            renderReports();
+        } catch (e) { document.getElementById('reportList').innerHTML = '読込失敗'; }
     }
 
-    async function loadReports() {
+    function renderReports() {
+        const query = document.getElementById('searchBar').value.toLowerCase();
         const listDiv = document.getElementById('reportList');
-        listDiv.innerHTML = '読み込み中...';
-        try {
-            const res = await fetch(`${apiURL}?action=getReports`);
-            currentLinks = await res.json(); // ここでも最新リストを保存
-            listDiv.innerHTML = '';
-            if(currentLinks.length === 0) { listDiv.innerHTML = '<p style="color:#8899a6;">リストは空です</p>'; return; }
+        listDiv.innerHTML = '';
+
+        currentLinks.forEach(raw => {
+            const parts = raw.split(SEP);
+            let d = parts.length >= 4 ? {url:parts[0], name:parts[1], id:parts[2], time:parts[3]} : {url:raw, name:'-', id: (raw.match(/(?:x|twitter)\.com\/([^\/\?]+)/) || [])[1] || '?', time:'-'};
             
-            currentLinks.forEach(url => {
-                const item = document.createElement('div');
-                item.className = 'report-item';
-                item.innerHTML = `
-                    <div style="font-size:12px; margin-bottom:10px; color:#8899a6;">${url}</div>
-                    <button class="btn del-btn" style="padding:8px; font-size:12px; width:auto;" onclick="sendAction('delete', '${url}')">このURLをリストから消す</button>
-                `;
-                listDiv.appendChild(item);
-            });
-        } catch (e) {
-            listDiv.innerHTML = 'エラー：読み込めませんでした';
-        }
+            if (!d.name.toLowerCase().includes(query) && !d.id.toLowerCase().includes(query)) return;
+
+            const item = document.createElement('div');
+            item.className = 'report-item';
+            item.innerHTML = `
+                <div style="font-size:11px; color:#8899a6; margin-bottom:5px;">${d.time}</div>
+                <div style="margin-bottom:8px;">
+                    <span class="user-badge">${d.name}</span>
+                    <span style="color:#1da1f2; font-size:14px;">@${d.id}</span>
+                </div>
+                <div style="font-size:12px; color:#8899a6; margin-bottom:10px;">${d.url}</div>
+                <button class="btn del-btn" style="padding:8px; font-size:12px; width:auto;" onclick="sendAction('delete', '${raw.replace(/'/g, "\\'")}')">削除</button>
+            `;
+            listDiv.appendChild(item);
+        });
     }
 
-    // 💡 起動時に1回リストを読み込んでおく
-    loadReportsSilent();
+    loadReports();
 </script>
 </body>
 </html>
