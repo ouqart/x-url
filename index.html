@@ -10,16 +10,20 @@
         .nav-item { cursor: pointer; font-weight: bold; font-size: 14px; padding: 8px 15px; border-radius: 20px; }
         .nav-item.active { background: white; color: #1da1f2; }
         .container { width: 95%; max-width: 500px; margin: auto; padding: 10px; box-sizing: border-box; }
-        .input-card { background: #192734; padding: 20px; border-radius: 15px; border: 1px solid #38444d; margin-bottom: 20px; text-align: left; }
+        .input-card, .search-card { background: #192734; padding: 15px; border-radius: 15px; border: 1px solid #38444d; margin-bottom: 20px; text-align: left; }
         label { font-size: 11px; color: #8899a6; display: block; margin-bottom: 5px; }
-        input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 14px; margin-bottom: 15px; box-sizing: border-box; }
+        input, select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 14px; margin-bottom: 10px; box-sizing: border-box; }
         .btn { border: none; padding: 12px; border-radius: 25px; font-weight: bold; cursor: pointer; font-size: 15px; width: 100%; background: #1da1f2; color: white; }
         .report-item { background: #192734; padding: 15px; margin-bottom: 12px; border-radius: 12px; border: 1px solid #38444d; text-align: left; }
-        /* 投稿時間を一番の目印にする */
-        .item-time { font-weight: bold; font-size: 18px; color: #ffffff; display: block; margin-bottom: 3px; }
-        .item-id { font-size: 14px; color: #1da1f2; margin-bottom: 5px; }
-        .item-url { font-size: 10px; color: #8899a6; word-break: break-all; opacity: 0.6; }
-        .del-btn { background: #e0245e; color: white; border: none; border-radius: 20px; padding: 8px 15px; font-size: 12px; font-weight: bold; cursor: pointer; }
+        
+        /* IDを最優先で大きく表示 */
+        .item-id { font-weight: bold; font-size: 20px; color: #1da1f2; display: block; margin-bottom: 2px; }
+        .item-time { font-size: 15px; color: #ffffff; margin-bottom: 5px; display: block; }
+        .item-url { font-size: 10px; color: #8899a6; word-break: break-all; opacity: 0.6; margin-bottom: 10px; }
+        
+        .action-btns { display: flex; gap: 8px; }
+        .edit-btn { background: #38444d; color: white; border: none; border-radius: 20px; padding: 6px 12px; font-size: 11px; cursor: pointer; }
+        .del-btn { background: #e0245e; color: white; border: none; border-radius: 20px; padding: 6px 12px; font-size: 11px; font-weight: bold; cursor: pointer; }
         .loading { opacity: 0.5; pointer-events: none; }
     </style>
 </head>
@@ -34,15 +38,20 @@
     <div class="input-card">
         <label>ターゲットURL</label>
         <input type="text" id="urlInput" placeholder="https://x.com/...">
-        
         <label>投稿日時（ラベル用）</label>
         <input type="datetime-local" id="timeInput">
-        
         <button id="submitBtn" class="btn" onclick="register()">リストへ追加</button>
     </div>
 </div>
 
 <div id="listPage" class="container" style="display:none;">
+    <div class="search-card">
+        <label>ID検索 / 絞り込み</label>
+        <input type="text" id="searchInput" placeholder="IDを入力して検索..." oninput="renderList()">
+        <select id="idFilter" onchange="renderList()">
+            <option value="">すべてのIDを表示</option>
+        </select>
+    </div>
     <div id="reportList">読込中...</div>
 </div>
 
@@ -64,15 +73,13 @@
     function showPage(p) {
         document.getElementById('addPage').style.display = p === 'add' ? 'block' : 'none';
         document.getElementById('listPage').style.display = p === 'list' ? 'block' : 'none';
-        const nAdd = document.getElementById('n-add');
-        const nList = document.getElementById('n-list');
         if(p === 'list') {
-            nAdd.classList.remove('active');
-            nList.classList.add('active');
+            document.getElementById('n-add').classList.remove('active');
+            document.getElementById('n-list').classList.add('active');
             loadCloudData();
         } else {
-            nAdd.classList.add('active');
-            nList.classList.remove('active');
+            document.getElementById('n-add').classList.add('active');
+            document.getElementById('n-list').classList.remove('active');
         }
     }
 
@@ -97,12 +104,28 @@
         try {
             const res = await fetch(`${apiURL}?action=getReports`);
             cloudUrls = await res.json();
+            updateFilterOptions();
             renderList();
         } catch(e) {}
     }
 
+    function updateFilterOptions() {
+        const filter = document.getElementById('idFilter');
+        const ids = [...new Set(cloudUrls.map(u => extractId(u)))].sort();
+        filter.innerHTML = '<option value="">すべてのIDを表示</option>';
+        ids.forEach(id => {
+            const opt = document.createElement('option');
+            opt.value = id;
+            opt.textContent = id;
+            filter.appendChild(opt);
+        });
+    }
+
     async function renderList() {
         const listDiv = document.getElementById('reportList');
+        const searchText = document.getElementById('searchInput').value.toLowerCase();
+        const filterId = document.getElementById('idFilter').value;
+
         const tx = db.transaction("meta", "readonly");
         const allLocal = await new Promise(r => {
             const arr = [];
@@ -113,25 +136,35 @@
 
         listDiv.innerHTML = '';
         [...new Set(cloudUrls)].forEach(u => {
+            const displayId = extractId(u);
+            // 検索と選択フィルタの適用
+            if (filterId && displayId !== filterId) return;
+            if (searchText && !displayId.toLowerCase().includes(searchText)) return;
+
             const d = allLocal.find(l => l.url === u) || { url: u, time: '' };
             const item = document.createElement('div');
             item.className = 'report-item';
             
-            // 秒なしの分単位で表示
             const displayTime = d.time ? d.time.replace('T', ' ') : '日時未設定';
-            const displayId = extractId(u);
 
             item.innerHTML = `
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div style="flex:1;">
-                        <span class="item-time">${displayTime}</span>
-                        <div class="item-id">${displayId}</div>
-                        <div class="item-url">${u}</div>
-                    </div>
+                <div class="item-id">${displayId}</div>
+                <div class="item-time">${displayTime}</div>
+                <div class="item-url">${u}</div>
+                <div class="action-btns">
+                    <button class="edit-btn" onclick="editTime('${u}', '${d.time}')">日時編集</button>
                     <button class="del-btn" onclick="deleteItem('${u}')">消去</button>
                 </div>`;
             listDiv.appendChild(item);
         });
+    }
+
+    async function editTime(url, currentTime) {
+        const newTime = prompt("新しい投稿日時を入力してください（例: 2024-04-29T16:05）", currentTime);
+        if (newTime === null) return;
+        const tx = db.transaction("meta", "readwrite");
+        await tx.objectStore("meta").put({ url, time: newTime });
+        renderList();
     }
 
     async function deleteItem(url) {
