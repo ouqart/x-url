@@ -3,197 +3,131 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>管理者用コントローラー</title>
+    <title>管理者用コントローラー（一括清掃機能付）</title>
     <style>
         body { font-family: -apple-system, sans-serif; margin: 0; background: #15202b; color: white; text-align: center; }
-        .nav { position: sticky; top: 0; background: #1da1f2; display: flex; justify-content: space-around; padding: 12px; z-index: 1000; }
-        .nav-item { cursor: pointer; font-weight: bold; font-size: 14px; padding: 5px 15px; border-radius: 20px; }
+        .nav { position: sticky; top: 0; background: #1da1f2; display: flex; justify-content: space-around; padding: 12px; z-index: 1000; border-bottom: 1px solid #38444d; }
+        .nav-item { cursor: pointer; font-weight: bold; font-size: 14px; padding: 8px 15px; border-radius: 20px; }
         .nav-item.active { background: white; color: #1da1f2; }
         .container { width: 95%; max-width: 500px; margin: auto; padding: 10px; box-sizing: border-box; }
         .input-card { background: #192734; padding: 20px; border-radius: 15px; border: 1px solid #38444d; margin-bottom: 20px; text-align: left; }
         input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 14px; margin-bottom: 15px; box-sizing: border-box; }
-        .btn { border: none; padding: 8px 15px; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 12px; transition: 0.2s; }
-        .add-btn { background: #1da1f2; color: white; width: 100%; padding: 15px; font-size: 16px; }
-        .add-btn:disabled { background: #555; cursor: not-allowed; }
-        .del-btn { background: #e0245e; color: white; }
-        .edit-btn { background: #17bf63; color: white; margin-right: 5px; }
-        .save-btn { background: #ffffff; color: #15202b; width: 100%; margin-top: 10px; padding: 10px; }
+        .btn { border: none; padding: 12px; border-radius: 25px; font-weight: bold; cursor: pointer; font-size: 14px; width: 100%; margin-bottom: 10px; }
+        .clean-btn { background: #e0245e; color: white; display: none; } /* 重複がある時だけ表示 */
+        .add-btn { background: #1da1f2; color: white; }
         .report-item { background: #192734; padding: 15px; margin-bottom: 12px; border-radius: 12px; border: 1px solid #38444d; text-align: left; }
-        .item-id { font-weight: bold; font-size: 16px; color: #1da1f2; margin-bottom: 5px; }
-        .item-info { font-size: 11px; color: #8899a6; margin-bottom: 8px; }
-        .item-url { font-size: 12px; color: #fff; word-break: break-all; opacity: 0.8; }
-        .edit-mode { display: none; margin-top: 10px; border-top: 1px solid #38444d; padding-top: 10px; }
-        .controls { display: flex; justify-content: flex-end; margin-top: 10px; }
-        #searchBar { border: 2px solid #1da1f2; margin-bottom: 15px; }
-        .loading { opacity: 0.5; pointer-events: none; }
+        .item-id { font-weight: bold; font-size: 16px; color: #1da1f2; }
+        .item-info { font-size: 11px; color: #8899a6; margin: 5px 0; }
+        #loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; align-items: center; justify-content: center; z-index: 2000; }
     </style>
 </head>
 <body>
 
+<div id="loader">スプレッドシートを最適化中...</div>
+
 <div class="nav">
-    <div id="nav-add" class="nav-item active" onclick="showPage('add')">新規追加</div>
-    <div id="nav-list" class="nav-item" onclick="showPage('list')">リスト編集</div>
+    <div class="nav-item active" id="n-add" onclick="showPage('add')">追加</div>
+    <div class="nav-item" id="n-list" onclick="showPage('list')">リスト編集</div>
 </div>
 
 <div id="addPage" class="container">
     <div class="input-card">
-        <label style="font-size: 12px; color: #8899a6;">投稿URL</label>
-        <input type="text" id="urlInput" placeholder="https://x.com/...">
-        <label style="font-size: 12px; color: #8899a6;">投稿日時（自分用）</label>
+        <input type="text" id="urlInput" placeholder="URLを入力">
         <input type="datetime-local" id="timeInput">
-        <button id="submitBtn" class="btn add-btn" onclick="register()">リストに追加・更新</button>
+        <button class="btn add-btn" onclick="register()">登録</button>
     </div>
 </div>
 
 <div id="listPage" class="container" style="display:none;">
-    <input type="text" id="searchBar" placeholder="ID・URLで検索..." oninput="renderList()">
+    <button id="cleanBtn" class="btn clean-btn" onclick="autoClean()">シート内の重複をすべて掃除する</button>
     <div id="reportList">読込中...</div>
 </div>
 
 <script>
     const apiURL = 'https://script.google.com/macros/s/AKfycbwNMIqyjChPN5ckansj4zEcv-fEF9G6jnIOrdopZTCLOMMSRH5pZTEpS4U7-7-IJG2s/exec';
     let db;
-    let cloudUrls = [];
+    let rawCloudUrls = []; // 重複を含む生のデータ
 
-    // DB接続
-    const request = indexedDB.open("AdminDB", 1);
-    request.onupgradeneeded = e => e.target.result.createObjectStore("meta", { keyPath: "url" });
+    const request = indexedDB.open("AdminDB", 35);
+    request.onupgradeneeded = e => {
+        const d = e.target.result;
+        if (d.objectStoreNames.contains("meta")) d.deleteObjectStore("meta");
+        d.createObjectStore("meta", { keyPath: "url" });
+    };
     request.onsuccess = e => { db = e.target.result; loadCloudData(); };
 
     function showPage(p) {
         document.getElementById('addPage').style.display = p === 'add' ? 'block' : 'none';
         document.getElementById('listPage').style.display = p === 'list' ? 'block' : 'none';
-        document.getElementById('nav-add').classList.toggle('active', p === 'add');
-        document.getElementById('nav-list').classList.toggle('active', p === 'list');
         if(p === 'list') loadCloudData();
     }
 
-    function extractId(url) {
-        if(!url) return "ID取得不可";
-        try {
-            const match = url.match(/(?:x|twitter)\.com\/(?:intent\/user\?screen_name=)?([^\/\?\s&]+)/i);
-            if (match && !["status", "i", "home", "explore", "messages", "notifications"].includes(match[1])) {
-                return "@" + match[1];
-            }
-            const statusMatch = url.match(/(?:x|twitter)\.com\/([^\/]+)\/status/i);
-            if (statusMatch) return "@" + statusMatch[1];
-        } catch(e) {}
-        return "ID取得不可";
+    // 重複を自動検知して掃除する機能
+    async function autoClean() {
+        const counts = {};
+        rawCloudUrls.forEach(u => counts[u] = (counts[u] || 0) + 1);
+        const dupes = Object.keys(counts).filter(u => counts[u] > 1);
+
+        if (dupes.length === 0) return alert("重複はありません");
+        if (!confirm(`${dupes.length}件の重複URLが見つかりました。シートを掃除しますか？`)) return;
+
+        document.getElementById('loader').style.display = 'flex';
+        for (const url of dupes) {
+            // 一旦全部消して、1個だけ登録し直す（これでシートが1行になる）
+            await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
+            await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
+        }
+        alert("掃除が完了しました。");
+        await loadCloudData();
+        document.getElementById('loader').style.display = 'none';
     }
 
-    // 登録処理（既存チェック付き）
     async function register() {
         const url = document.getElementById('urlInput').value.trim();
         const time = document.getElementById('timeInput').value;
-        const btn = document.getElementById('submitBtn');
         if(!url) return;
+        
+        // 送信前に重複チェック（既にあるなら送信せず上書きのみ）
+        const isDupe = rawCloudUrls.includes(url);
+        if(!isDupe) await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
 
-        // 手元のDBに既にあるか確認
-        const txCheck = db.transaction("meta", "readonly");
-        const existing = await new Promise(res => {
-            txCheck.objectStore("meta").get(url).onsuccess = e => res(e.target.result);
-        });
-
-        btn.disabled = true;
-        document.body.classList.add('loading');
-
-        try {
-            if (existing) {
-                // すでにリストにある場合はスプレッドシート(GAS)には送らない
-                console.log("既存URLのため送信スキップ");
-            } else {
-                // 新規URLの場合のみスプレッドシートへ送信
-                await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
-            }
-            
-            // いずれにせよ手元のIndexedDBの日時情報を更新（上書き）
-            const tx = db.transaction("meta", "readwrite");
-            await tx.objectStore("meta").put({ url, id: extractId(url), time, name: "" });
-            
-            alert(existing ? "既存データの日時を更新しました" : "新規登録しました");
-            document.getElementById('urlInput').value = "";
-            document.getElementById('timeInput').value = "";
-            
-            if (existing) renderList(); else loadCloudData();
-        } catch (e) { alert("エラーが発生しました"); }
-
-        btn.disabled = false;
-        document.body.classList.remove('loading');
+        const tx = db.transaction("meta", "readwrite");
+        await tx.objectStore("meta").put({ url, id: url.split('/')[3] || "@不明", time, name: "" });
+        
+        alert(isDupe ? "手元の日時を更新しました" : "新規登録しました");
+        document.getElementById('urlInput').value = "";
+        loadCloudData();
     }
 
     async function loadCloudData() {
-        try {
-            const res = await fetch(`${apiURL}?action=getReports`);
-            cloudUrls = await res.json();
-            renderList();
-        } catch(e) { console.error("データ読込エラー"); }
+        const res = await fetch(`${apiURL}?action=getReports`);
+        rawCloudUrls = await res.json();
+        
+        // 重複があるか確認してボタンを出す
+        const hasDupe = new Set(rawCloudUrls).size !== rawCloudUrls.length;
+        document.getElementById('cleanBtn').style.display = hasDupe ? 'block' : 'none';
+        
+        renderList();
     }
 
     async function renderList() {
-        const q = document.getElementById('searchBar').value.toLowerCase();
         const listDiv = document.getElementById('reportList');
         const tx = db.transaction("meta", "readonly");
-        const store = tx.objectStore("meta");
-
-        const allLocal = await new Promise(res => {
-            const data = [];
-            store.openCursor().onsuccess = e => {
-                const c = e.target.result;
-                if(c) { data.push(c.value); c.continue(); } else res(data);
+        const allLocal = await new Promise(r => {
+            const arr = [];
+            tx.objectStore("meta").openCursor().onsuccess = e => {
+                const c = e.target.result; if(c){arr.push(c.value);c.continue();}else r(arr);
             };
         });
 
         listDiv.innerHTML = '';
-        // 重複を除去したURLリストを作成
-        const uniqueUrls = [...new Set(cloudUrls)];
-
-        uniqueUrls.map(url => {
-            return allLocal.find(l => l.url === url) || { url, id: extractId(url), time: '' };
-        })
-        .sort((a,b) => (b.time || "").localeCompare(a.time || "") || 1)
-        .forEach((d, i) => {
-            if (!d.id.toLowerCase().includes(q) && !d.url.toLowerCase().includes(q)) return;
+        [...new Set(rawCloudUrls)].forEach(u => {
+            const d = allLocal.find(l => l.url === u) || { url: u, id: "@不明", time: '' };
             const item = document.createElement('div');
             item.className = 'report-item';
-            item.innerHTML = `
-                <div class="item-id">${d.id}</div>
-                <div class="item-info">${d.time ? d.time.replace('T', ' ') : '日時未設定（再登録で設定可）'}</div>
-                <div class="item-url">${d.url}</div>
-                <div class="controls">
-                    <button class="btn edit-btn" onclick="toggleEdit(${i})">日時編集</button>
-                    <button class="btn del-btn" onclick="deleteItem('${d.url.replace(/'/g, "\\'")}')">削除</button>
-                </div>
-                <div id="edit-${i}" class="edit-mode">
-                    <input type="datetime-local" id="et-${i}" value="${d.time}">
-                    <button class="btn save-btn" onclick="updateTime('${d.url.replace(/'/g, "\\'")}', '${d.id}', ${i})">保存</button>
-                </div>`;
+            item.innerHTML = `<div class="item-id">${d.id}</div><div class="item-info">${d.time || '日時未設定'}</div><div style="font-size:10px;opacity:0.6">${u}</div>`;
             listDiv.appendChild(item);
         });
-    }
-
-    function toggleEdit(i) {
-        const b = document.getElementById(`edit-${i}`);
-        b.style.display = b.style.display === 'block' ? 'none' : 'block';
-    }
-
-    async function updateTime(url, id, i) {
-        const t = document.getElementById(`et-${i}`).value;
-        const tx = db.transaction("meta", "readwrite");
-        await tx.objectStore("meta").put({ url, id, time: t, name: "" });
-        renderList();
-        alert("日時を更新しました");
-    }
-
-    async function deleteItem(url) {
-        if(!confirm("スプレッドシートからも削除しますか？")) return;
-        document.body.classList.add('loading');
-        try {
-            await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
-            const tx = db.transaction("meta", "readwrite");
-            await tx.objectStore("meta").delete(url);
-            loadCloudData();
-        } catch(e) { alert("削除エラー"); }
-        document.body.classList.remove('loading');
     }
 </script>
 </body>
