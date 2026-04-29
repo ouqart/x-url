@@ -10,41 +10,43 @@
         .nav-item { cursor: pointer; font-weight: bold; font-size: 14px; padding: 5px 15px; border-radius: 20px; }
         .nav-item.active { background: white; color: #1da1f2; }
         .container { width: 95%; max-width: 500px; margin: auto; padding: 10px; box-sizing: border-box; }
-        .input-card { background: #192734; padding: 15px; border-radius: 15px; border: 1px solid #38444d; margin-bottom: 20px; text-align: left; }
-        input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 14px; margin-bottom: 10px; box-sizing: border-box; }
+        .input-card { background: #192734; padding: 20px; border-radius: 15px; border: 1px solid #38444d; margin-bottom: 20px; text-align: left; }
+        input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 14px; margin-bottom: 15px; box-sizing: border-box; }
         .btn { border: none; padding: 8px 15px; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 12px; transition: 0.2s; }
-        .add-btn { background: #1da1f2; color: white; width: 100%; padding: 15px; font-size: 16px; margin-top: 5px; }
+        .add-btn { background: #1da1f2; color: white; width: 100%; padding: 15px; font-size: 16px; }
         .del-btn { background: #e0245e; color: white; }
         .edit-btn { background: #17bf63; color: white; margin-right: 5px; }
         .save-btn { background: #ffffff; color: #15202b; width: 100%; margin-top: 10px; padding: 10px; }
-        .report-item { background: #192734; padding: 15px; margin-bottom: 12px; border-radius: 12px; border: 1px solid #38444d; text-align: left; box-sizing: border-box; }
-        .item-info { font-size: 11px; color: #8899a6; margin-bottom: 3px; }
-        .item-name { font-weight: bold; font-size: 15px; margin-bottom: 5px; color: #fff; }
-        .item-url { font-size: 12px; color: #1da1f2; margin-bottom: 12px; word-break: break-all; }
+        .report-item { background: #192734; padding: 15px; margin-bottom: 12px; border-radius: 12px; border: 1px solid #38444d; text-align: left; }
+        .item-id { font-weight: bold; font-size: 16px; color: #1da1f2; margin-bottom: 5px; }
+        .item-info { font-size: 11px; color: #8899a6; margin-bottom: 8px; }
+        .item-url { font-size: 12px; color: #fff; word-break: break-all; opacity: 0.8; }
         .edit-mode { display: none; margin-top: 10px; border-top: 1px solid #38444d; padding-top: 10px; }
-        .controls { display: flex; justify-content: flex-end; }
+        .controls { display: flex; justify-content: flex-end; margin-top: 10px; }
+        #searchBar { border: 2px solid #1da1f2; margin-bottom: 15px; }
         .loading { opacity: 0.5; pointer-events: none; }
     </style>
 </head>
 <body>
 
 <div class="nav">
-    <div id="nav-add" class="nav-item active" onclick="showPage('add')">追加</div>
+    <div id="nav-add" class="nav-item active" onclick="showPage('add')">新規追加</div>
     <div id="nav-list" class="nav-item" onclick="showPage('list')">リスト編集</div>
 </div>
 
 <div id="addPage" class="container">
     <div class="input-card">
-        <input type="text" id="urlInput" placeholder="URL">
-        <input type="text" id="nameInput" placeholder="ユーザー名">
+        <label style="font-size: 12px; color: #8899a6;">投稿URL</label>
+        <input type="text" id="urlInput" placeholder="https://x.com/username/status/...">
+        <label style="font-size: 12px; color: #8899a6;">日時</label>
         <input type="datetime-local" id="timeInput">
         <button class="btn add-btn" onclick="register()">リストに追加</button>
     </div>
 </div>
 
 <div id="listPage" class="container" style="display:none;">
-    <input type="text" id="searchBar" placeholder="名前・ID検索" oninput="renderList()" oncompositionend="renderList()">
-    <div id="reportList" style="margin-top:15px;">読込中...</div>
+    <input type="text" id="searchBar" placeholder="IDで検索..." oninput="renderList()">
+    <div id="reportList">読込中...</div>
 </div>
 
 <script>
@@ -64,39 +66,22 @@
         if(p === 'list') loadCloudData();
     }
 
+    // ID抽出ロジック（不明を極力出さない）
     function extractId(url) {
-        const m = url.match(/(?:x|twitter)\.com\/(?:intent\/user\?screen_name=)?([^\/\?\s&]+)/i);
-        return m ? m[1] : "不明";
-    }
-
-    // IDをキーにDB内を強制的に全部書き換える関数
-    async function syncAllById(targetId, newName) {
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction("meta", "readwrite");
-            const store = tx.objectStore("meta");
-            const request = store.openCursor();
-            
-            request.onsuccess = (e) => {
-                const cursor = e.target.result;
-                if (cursor) {
-                    if (cursor.value.id === targetId) {
-                        const data = cursor.value;
-                        data.name = newName;
-                        cursor.update(data);
-                    }
-                    cursor.continue();
-                } else {
-                    resolve(); // 全スキャン終了
-                }
-            };
-            tx.oncomplete = () => resolve();
-            tx.onerror = () => reject();
-        });
+        if(!url) return "ID取得不可";
+        const match = url.match(/(?:x|twitter)\.com\/(?:intent\/user\?screen_name=)?([^\/\?\s&]+)/i);
+        if (match && match[1] !== "status" && match[1] !== "i") {
+            return "@" + match[1];
+        }
+        // ステータスURLの場合の再抽出
+        const statusMatch = url.match(/(?:x|twitter)\.com\/([^\/]+)\/status/i);
+        if (statusMatch) return "@" + statusMatch[1];
+        
+        return "ID取得不可";
     }
 
     async function register() {
         const url = document.getElementById('urlInput').value.trim();
-        const name = document.getElementById('nameInput').value.trim();
         const time = document.getElementById('timeInput').value;
         const id = extractId(url);
         if(!url) return;
@@ -104,24 +89,12 @@
         document.body.classList.add('loading');
         try {
             await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
-            
-            // 1. 今回のデータを保存
             const tx = db.transaction("meta", "readwrite");
-            await new Promise((res) => {
-                const req = tx.objectStore("meta").put({ url, name, id, time });
-                req.onsuccess = res;
-            });
-
-            // 2. 名前があれば、過去の全データも確実に同期
-            if (name) {
-                await syncAllById(id, name);
-            }
-            
-            alert("登録完了");
-            ["urlInput","nameInput","timeInput"].forEach(i => document.getElementById(i).value="");
-        } catch (e) {
-            alert("エラーが発生しました");
-        }
+            await tx.objectStore("meta").put({ url, id, time, name: "" }); // 名前は空で保存
+            alert("登録しました");
+            document.getElementById('urlInput').value = "";
+            document.getElementById('timeInput').value = "";
+        } catch (e) { alert("エラー"); }
         document.body.classList.remove('loading');
     }
 
@@ -134,48 +107,40 @@
     async function renderList() {
         const q = document.getElementById('searchBar').value.toLowerCase();
         const listDiv = document.getElementById('reportList');
-        
-        // 最新のDB状態を取得
         const tx = db.transaction("meta", "readonly");
         const store = tx.objectStore("meta");
+
         const allLocal = await new Promise(res => {
             const data = [];
             store.openCursor().onsuccess = e => {
                 const c = e.target.result;
-                if(c) { data.push(c.value); c.continue(); }
-                else res(data);
+                if(c) { data.push(c.value); c.continue(); } else res(data);
             };
         });
 
         listDiv.innerHTML = '';
-        const displayData = cloudUrls.map(url => {
-            const local = allLocal.find(l => l.url === url);
-            return {
-                url,
-                id: local ? local.id : extractId(url),
-                name: local ? local.name : "",
-                time: local ? local.time : ""
-            };
-        });
-
-        displayData.sort((a,b) => (b.time || "").localeCompare(a.time || "") || 1).forEach((d, i) => {
-            if (!d.name.toLowerCase().includes(q) && !d.id.toLowerCase().includes(q)) return;
+        cloudUrls.map(url => {
+            const local = allLocal.find(l => l.url === url) || { url, id: extractId(url), time: '' };
+            return local;
+        })
+        .sort((a,b) => (b.time || "").localeCompare(a.time || "") || 1)
+        .forEach((d, i) => {
+            if (!d.id.toLowerCase().includes(q) && !d.url.toLowerCase().includes(q)) return;
+            
             const item = document.createElement('div');
             item.className = 'report-item';
             item.innerHTML = `
-                <div class="item-info">@${d.id} | ${d.time ? d.time.replace('T', ' ') : '日時なし'}</div>
-                <div class="item-name">${d.name || '(名前未設定)'}</div>
+                <div class="item-id">${d.id}</div>
+                <div class="item-info">${d.time ? d.time.replace('T', ' ') : '日時未設定'}</div>
                 <div class="item-url">${d.url}</div>
                 <div class="controls">
-                    <button class="btn edit-btn" onclick="toggleEdit(${i})">編集</button>
+                    <button class="btn edit-btn" onclick="toggleEdit(${i})">日時編集</button>
                     <button class="btn del-btn" onclick="deleteItem('${d.url.replace(/'/g, "\\'")}')">削除</button>
                 </div>
                 <div id="edit-${i}" class="edit-mode">
-                    <input type="text" id="en-${i}" value="${d.name}">
                     <input type="datetime-local" id="et-${i}" value="${d.time}">
-                    <button class="btn save-btn" onclick="updateMeta('${d.url.replace(/'/g, "\\'")}', ${i}, '${d.id}')">このIDをすべて更新</button>
-                </div>
-            `;
+                    <button class="btn save-btn" onclick="updateTime('${d.url.replace(/'/g, "\\'")}', '${d.id}', ${i})">日時を保存</button>
+                </div>`;
             listDiv.appendChild(item);
         });
     }
@@ -185,44 +150,21 @@
         b.style.display = b.style.display === 'block' ? 'none' : 'block';
     }
 
-    async function updateMeta(url, i, id) {
-        const n = document.getElementById(`en-${i}`).value;
+    async function updateTime(url, id, i) {
         const t = document.getElementById(`et-${i}`).value;
-        document.body.classList.add('loading');
-        
-        try {
-            // 1. 同一IDのすべての名前を確実に書き換える（完了を待つ）
-            await syncAllById(id, n);
-            
-            // 2. 編集中の行を個別に確定保存
-            const tx = db.transaction("meta", "readwrite");
-            await new Promise(res => {
-                const req = tx.objectStore("meta").put({ url, name: n, id, time: t });
-                req.onsuccess = res;
-            });
-            
-            await renderList();
-            alert("同期更新が完了しました");
-        } catch(e) {
-            alert("更新に失敗しました");
-        }
-        document.body.classList.remove('loading');
+        const tx = db.transaction("meta", "readwrite");
+        await tx.objectStore("meta").put({ url, id, time: t, name: "" });
+        renderList();
+        alert("更新しました");
     }
 
     async function deleteItem(url) {
         if(!confirm("削除しますか？")) return;
         document.body.classList.add('loading');
-        try {
-            await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
-            const tx = db.transaction("meta", "readwrite");
-            await new Promise(res => {
-                const req = tx.objectStore("meta").delete(url);
-                req.onsuccess = res;
-            });
-            await loadCloudData();
-        } catch(e) {
-            alert("削除失敗");
-        }
+        await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
+        const tx = db.transaction("meta", "readwrite");
+        await tx.objectStore("meta").delete(url);
+        loadCloudData();
         document.body.classList.remove('loading');
     }
 </script>
