@@ -39,9 +39,9 @@
     <div class="input-card">
         <label style="font-size: 12px; color: #8899a6;">投稿URL</label>
         <input type="text" id="urlInput" placeholder="https://x.com/...">
-        <label style="font-size: 12px; color: #8899a6;">日時</label>
+        <label style="font-size: 12px; color: #8899a6;">投稿日時（自分用）</label>
         <input type="datetime-local" id="timeInput">
-        <button id="submitBtn" class="btn add-btn" onclick="register()">リストに追加</button>
+        <button id="submitBtn" class="btn add-btn" onclick="register()">リストに追加・更新</button>
     </div>
 </div>
 
@@ -55,6 +55,7 @@
     let db;
     let cloudUrls = [];
 
+    // DB接続
     const request = indexedDB.open("AdminDB", 1);
     request.onupgradeneeded = e => e.target.result.createObjectStore("meta", { keyPath: "url" });
     request.onsuccess = e => { db = e.target.result; loadCloudData(); };
@@ -80,46 +81,52 @@
         return "ID取得不可";
     }
 
+    // 登録処理（既存チェック付き）
     async function register() {
         const url = document.getElementById('urlInput').value.trim();
         const time = document.getElementById('timeInput').value;
         const btn = document.getElementById('submitBtn');
         if(!url) return;
 
+        // 手元のDBに既にあるか確認
         const txCheck = db.transaction("meta", "readonly");
         const existing = await new Promise(res => {
             txCheck.objectStore("meta").get(url).onsuccess = e => res(e.target.result);
         });
 
-        // 日時が登録済みなら重複警告。日時が空なら上書き許可。
-        if (existing && existing.time) {
-            alert("このURLは既に日時付きで登録されています。");
-            return;
-        }
-
         btn.disabled = true;
         document.body.classList.add('loading');
 
         try {
-            // スプレッドシートへ（no-corsなので重複しても向こうで処理される想定）
-            await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
+            if (existing) {
+                // すでにリストにある場合はスプレッドシート(GAS)には送らない
+                console.log("既存URLのため送信スキップ");
+            } else {
+                // 新規URLの場合のみスプレッドシートへ送信
+                await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
+            }
             
+            // いずれにせよ手元のIndexedDBの日時情報を更新（上書き）
             const tx = db.transaction("meta", "readwrite");
             await tx.objectStore("meta").put({ url, id: extractId(url), time, name: "" });
             
-            alert(existing ? "既存データの日時を更新しました" : "登録しました");
+            alert(existing ? "既存データの日時を更新しました" : "新規登録しました");
             document.getElementById('urlInput').value = "";
             document.getElementById('timeInput').value = "";
-        } catch (e) { alert("エラー"); }
+            
+            if (existing) renderList(); else loadCloudData();
+        } catch (e) { alert("エラーが発生しました"); }
 
         btn.disabled = false;
         document.body.classList.remove('loading');
     }
 
     async function loadCloudData() {
-        const res = await fetch(`${apiURL}?action=getReports`);
-        cloudUrls = await res.json();
-        renderList();
+        try {
+            const res = await fetch(`${apiURL}?action=getReports`);
+            cloudUrls = await res.json();
+            renderList();
+        } catch(e) { console.error("データ読込エラー"); }
     }
 
     async function renderList() {
@@ -137,7 +144,10 @@
         });
 
         listDiv.innerHTML = '';
-        cloudUrls.map(url => {
+        // 重複を除去したURLリストを作成
+        const uniqueUrls = [...new Set(cloudUrls)];
+
+        uniqueUrls.map(url => {
             return allLocal.find(l => l.url === url) || { url, id: extractId(url), time: '' };
         })
         .sort((a,b) => (b.time || "").localeCompare(a.time || "") || 1)
@@ -147,7 +157,7 @@
             item.className = 'report-item';
             item.innerHTML = `
                 <div class="item-id">${d.id}</div>
-                <div class="item-info">${d.time ? d.time.replace('T', ' ') : '日時未設定'}</div>
+                <div class="item-info">${d.time ? d.time.replace('T', ' ') : '日時未設定（再登録で設定可）'}</div>
                 <div class="item-url">${d.url}</div>
                 <div class="controls">
                     <button class="btn edit-btn" onclick="toggleEdit(${i})">日時編集</button>
@@ -171,16 +181,18 @@
         const tx = db.transaction("meta", "readwrite");
         await tx.objectStore("meta").put({ url, id, time: t, name: "" });
         renderList();
-        alert("更新しました");
+        alert("日時を更新しました");
     }
 
     async function deleteItem(url) {
-        if(!confirm("削除しますか？")) return;
+        if(!confirm("スプレッドシートからも削除しますか？")) return;
         document.body.classList.add('loading');
-        await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
-        const tx = db.transaction("meta", "readwrite");
-        await tx.objectStore("meta").delete(url);
-        loadCloudData();
+        try {
+            await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
+            const tx = db.transaction("meta", "readwrite");
+            await tx.objectStore("meta").delete(url);
+            loadCloudData();
+        } catch(e) { alert("削除エラー"); }
         document.body.classList.remove('loading');
     }
 </script>
