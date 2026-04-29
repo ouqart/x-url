@@ -10,24 +10,19 @@
         .nav-item { cursor: pointer; font-weight: bold; font-size: 14px; padding: 5px 15px; border-radius: 20px; }
         .nav-item.active { background: white; color: #1da1f2; }
         .container { width: 95%; max-width: 500px; margin: auto; padding: 10px; box-sizing: border-box; }
-        
         .input-card { background: #192734; padding: 15px; border-radius: 15px; border: 1px solid #38444d; margin-bottom: 20px; text-align: left; }
         input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #38444d; background: #15202b; color: white; font-size: 14px; margin-bottom: 10px; box-sizing: border-box; }
-        
         .btn { border: none; padding: 8px 15px; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 12px; transition: 0.2s; }
         .add-btn { background: #1da1f2; color: white; width: 100%; padding: 15px; font-size: 16px; margin-top: 5px; }
         .del-btn { background: #e0245e; color: white; }
         .edit-btn { background: #17bf63; color: white; margin-right: 5px; }
         .save-btn { background: #ffffff; color: #15202b; width: 100%; margin-top: 10px; padding: 10px; }
-        
         .report-item { background: #192734; padding: 15px; margin-bottom: 12px; border-radius: 12px; border: 1px solid #38444d; text-align: left; box-sizing: border-box; overflow: hidden; }
         .item-info { font-size: 11px; color: #8899a6; margin-bottom: 5px; overflow-wrap: break-word; }
         .item-name { font-weight: bold; font-size: 15px; margin-bottom: 5px; color: #fff; }
         .item-url { font-size: 12px; color: #1da1f2; margin-bottom: 12px; word-break: break-all; line-height: 1.4; }
-        
         .edit-mode { display: none; margin-top: 10px; border-top: 1px solid #38444d; padding-top: 10px; }
         .controls { display: flex; justify-content: flex-end; align-items: center; }
-        
         #searchBar { border: 2px solid #1da1f2; margin-top: 10px; }
         .loading { opacity: 0.5; pointer-events: none; }
     </style>
@@ -57,6 +52,7 @@
     const apiURL = 'https://script.google.com/macros/s/AKfycbwNMIqyjChPN5ckansj4zEcv-fEF9G6jnIOrdopZTCLOMMSRH5pZTEpS4U7-7-IJG2s/exec';
     let db;
     let cloudUrls = [];
+    let allMeta = []; // 同期用
 
     const request = indexedDB.open("AdminDB", 1);
     request.onupgradeneeded = e => e.target.result.createObjectStore("meta", { keyPath: "url" });
@@ -70,10 +66,8 @@
         if(p === 'list') loadCloudData();
     }
 
-    // ID抽出を強化
     function extractId(url) {
         if(!url) return "不明";
-        // 通常のURL、インテントURL、末尾のスラッシュ等に対応
         const match = url.match(/(?:x|twitter)\.com\/(?:intent\/user\?screen_name=)?([^\/\?\s&]+)/i);
         return match ? match[1] : "不明";
     }
@@ -86,16 +80,43 @@
         if(!url) return alert("URLを入力してください");
 
         document.body.classList.add('loading');
-        // スプレッドシートにはURLのみ
         await fetch(`${apiURL}?action=add&url=${encodeURIComponent(url)}`, { mode: 'no-cors' });
 
-        // ローカルにメタ情報を保存
         const tx = db.transaction("meta", "readwrite");
-        tx.objectStore("meta").put({ url, name, id, time });
+        const store = tx.objectStore("meta");
+
+        // 【修正】追加時に同じIDのデータがあれば名前を同期する
+        if (name) {
+            await syncNamesInDB(id, name);
+        }
+
+        await store.put({ url, name, id, time });
         
         alert("登録完了");
         ["urlInput","nameInput","timeInput"].forEach(i => document.getElementById(i).value="");
         document.body.classList.remove('loading');
+    }
+
+    // DB内の特定のIDの名前を一括更新する共通関数
+    function syncNamesInDB(id, newName) {
+        return new Promise((resolve) => {
+            const tx = db.transaction("meta", "readwrite");
+            const store = tx.objectStore("meta");
+            const request = store.openCursor();
+            request.onsuccess = (e) => {
+                const cursor = e.target.result;
+                if (cursor) {
+                    if (cursor.value.id === id && cursor.value.name !== newName) {
+                        const updatedData = cursor.value;
+                        updatedData.name = newName;
+                        cursor.update(updatedData);
+                    }
+                    cursor.continue();
+                } else {
+                    resolve();
+                }
+            };
+        });
     }
 
     async function loadCloudData() {
@@ -112,20 +133,18 @@
         const tx = db.transaction("meta", "readonly");
         const store = tx.objectStore("meta");
 
-        const displayData = await Promise.all(cloudUrls.map(url => {
+        allMeta = await Promise.all(cloudUrls.map(url => {
             return new Promise(resolve => {
                 const req = store.get(url);
                 req.onsuccess = () => {
                     const meta = req.result || { name: '', time: '', id: extractId(url) };
-                    // 保存されていなかった場合でも、その場でIDを再抽出して補完
                     if(meta.id === "不明") meta.id = extractId(url);
                     resolve({ url, ...meta });
                 };
             });
         }));
 
-        // 日時(降順) > 登録順
-        displayData.sort((a,b) => b.time.localeCompare(a.time) || 1).forEach((d, i) => {
+        allMeta.sort((a,b) => b.time.localeCompare(a.time) || 1).forEach((d, i) => {
             if (!d.name.toLowerCase().includes(q) && !d.id.toLowerCase().includes(q)) return;
 
             const item = document.createElement('div');
@@ -141,7 +160,7 @@
                 <div id="edit-${i}" class="edit-mode">
                     <input type="text" id="en-${i}" value="${d.name}" placeholder="ユーザー名">
                     <input type="datetime-local" id="et-${i}" value="${d.time}">
-                    <button class="btn save-btn" onclick="updateMeta('${d.url}', ${i}, '${d.id}', displayData)">このIDの情報を更新</button>
+                    <button class="btn save-btn" onclick="updateMeta('${d.url}', ${i}, '${d.id}')">このIDの情報を更新</button>
                 </div>
             `;
             listDiv.appendChild(item);
@@ -153,20 +172,18 @@
         b.style.display = b.style.display === 'block' ? 'none' : 'block';
     }
 
-    async function updateMeta(url, i, id, allData) {
+    async function updateMeta(url, i, id) {
         const name = document.getElementById(`en-${i}`).value;
         const time = document.getElementById(`et-${i}`).value;
+        
+        await syncNamesInDB(id, name);
+        
         const tx = db.transaction("meta", "readwrite");
         const store = tx.objectStore("meta");
+        await store.put({ url, name, id, time });
         
-        // 同一IDのデータを一括で名前のみ同期
-        allData.filter(d => d.id === id).forEach(d => {
-            store.put({ url: d.url, name, id, time: d.time });
-        });
-        // 今回編集した行自体は日時も含めて保存
-        store.put({ url, name, id, time });
         renderList();
-        alert("更新しました");
+        alert("一括更新しました");
     }
 
     async function deleteItem(url) {
