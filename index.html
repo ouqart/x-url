@@ -17,7 +17,7 @@
         .del-btn { background: #e0245e; color: white; }
         .report-item { background: #192734; padding: 15px; margin-bottom: 10px; border-radius: 10px; border: 1px solid #38444d; text-align: left; }
         .loading { opacity: 0.5; pointer-events: none; }
-        #searchBar { border: 2px solid #1da1f2; margin-bottom: 20px; sticky: top; }
+        #searchBar { border: 2px solid #1da1f2; margin-bottom: 20px; }
         .user-badge { background: #38444d; padding: 2px 8px; border-radius: 5px; font-size: 12px; color: #1da1f2; margin-right: 5px; }
     </style>
 </head>
@@ -30,9 +30,8 @@
 
 <div id="addPage" class="container">
     <div class="input-card">
-        <input type="text" id="urlInput" placeholder="URL (https://x.com/...)">
-        <input type="text" id="nameInput" placeholder="ユーザー名">
-        <input type="text" id="idInput" placeholder="ユーザーID (@...)">
+        <input type="text" id="urlInput" placeholder="URLを貼り付け">
+        <input type="text" id="nameInput" placeholder="表示名 (任意)">
         <input type="datetime-local" id="timeInput">
         <button id="addBtn" class="btn add-btn" onclick="checkAndSend()">通報リストに追加</button>
     </div>
@@ -58,12 +57,15 @@
 
     async function checkAndSend() {
         const url = document.getElementById('urlInput').value.trim();
-        const name = document.getElementById('nameInput').value.trim() || '不明';
-        const id = document.getElementById('idInput').value.trim() || '不明';
-        const time = document.getElementById('timeInput').value || '-';
+        const name = document.getElementById('nameInput').value.trim() || '未設定';
+        const time = document.getElementById('timeInput').value || '';
+        
+        // IDはURLから自動抽出
+        const idMatch = url.match(/(?:x|twitter)\.com\/([^\/\?]+)/);
+        const id = idMatch ? idMatch[1] : '不明';
 
-        if(!url) return alert('URLは必須です');
-        if (currentLinks.some(link => link.includes(url))) return alert('既に存在します');
+        if(!url) return alert('URLを入力してください');
+        if (currentLinks.some(link => link.includes(url))) return alert('既に追加済み');
 
         const composite = `${url}${SEP}${name}${SEP}${id}${SEP}${time}`;
         sendAction('add', composite);
@@ -74,7 +76,7 @@
         try {
             await fetch(`${apiURL}?action=${type}&url=${encodeURIComponent(value)}`, { mode: 'no-cors' });
             alert('完了');
-            if(type === 'add') ["urlInput","nameInput","idInput","timeInput"].forEach(i => document.getElementById(i).value = "");
+            if(type === 'add') ["urlInput","nameInput","timeInput"].forEach(i => document.getElementById(i).value = "");
             loadReports();
         } catch (e) { alert('エラー'); }
         document.body.classList.remove('loading');
@@ -83,7 +85,31 @@
     async function loadReports() {
         try {
             const res = await fetch(`${apiURL}?action=getReports`);
-            currentLinks = await res.json();
+            const data = await res.json();
+            
+            // データをオブジェクト化してソート
+            const parsed = data.map((raw, index) => {
+                const parts = raw.split(SEP);
+                const idMatch = raw.match(/(?:x|twitter)\.com\/([^\/\?]+)/);
+                return {
+                    raw: raw,
+                    index: index, // 元々の登録順（日時がない場合のバックアップ）
+                    url: parts[0] || raw,
+                    name: parts[1] || '-',
+                    id: parts[2] || (idMatch ? idMatch[1] : '?'),
+                    time: parts[3] || ''
+                };
+            });
+
+            // ソートロジック: 日時の降順 > 登録順(index)の降順
+            parsed.sort((a, b) => {
+                if (a.time && b.time) return b.time.localeCompare(a.time);
+                if (a.time && !b.time) return -1;
+                if (!a.time && b.time) return 1;
+                return b.index - a.index;
+            });
+
+            currentLinks = parsed;
             renderReports();
         } catch (e) { document.getElementById('reportList').innerHTML = '読込失敗'; }
     }
@@ -93,22 +119,19 @@
         const listDiv = document.getElementById('reportList');
         listDiv.innerHTML = '';
 
-        currentLinks.forEach(raw => {
-            const parts = raw.split(SEP);
-            let d = parts.length >= 4 ? {url:parts[0], name:parts[1], id:parts[2], time:parts[3]} : {url:raw, name:'-', id: (raw.match(/(?:x|twitter)\.com\/([^\/\?]+)/) || [])[1] || '?', time:'-'};
-            
+        currentLinks.forEach(d => {
             if (!d.name.toLowerCase().includes(query) && !d.id.toLowerCase().includes(query)) return;
 
             const item = document.createElement('div');
             item.className = 'report-item';
             item.innerHTML = `
-                <div style="font-size:11px; color:#8899a6; margin-bottom:5px;">${d.time}</div>
+                <div style="font-size:11px; color:#8899a6; margin-bottom:5px;">${d.time ? '投稿日: ' + d.time : '登録順'}</div>
                 <div style="margin-bottom:8px;">
                     <span class="user-badge">${d.name}</span>
                     <span style="color:#1da1f2; font-size:14px;">@${d.id}</span>
                 </div>
-                <div style="font-size:12px; color:#8899a6; margin-bottom:10px;">${d.url}</div>
-                <button class="btn del-btn" style="padding:8px; font-size:12px; width:auto;" onclick="sendAction('delete', '${raw.replace(/'/g, "\\'")}')">削除</button>
+                <div style="font-size:12px; color:#8899a6; margin-bottom:10px; word-break:break-all;">${d.url}</div>
+                <button class="btn del-btn" style="padding:8px; font-size:12px; width:auto;" onclick="sendAction('delete', '${d.raw.replace(/'/g, "\\'")}')">削除</button>
             `;
             listDiv.appendChild(item);
         });
