@@ -69,20 +69,19 @@
         const name = document.getElementById('nameInput').value.trim();
         const time = document.getElementById('timeInput').value;
         const id = extractId(url);
+        if(!url) return;
 
-        if(!url) return alert('URLなし');
-        
-        // 追加時に同じIDがあれば、その名前を今回の名前に合わせる（一括更新処理を走らせる）
-        if (name) {
-            await syncNamesById(id, name);
-        }
+        // 同じURLの古いデータがあれば先に削除（重複防止）
+        const oldData = currentLinks.find(l => l.url === url);
+        if (oldData) await sendAction('delete', oldData.raw, null, true);
 
+        if (name) await syncNamesById(id, name);
         const composite = `${url}${SEP}${name}${SEP}${id}${SEP}${time}`;
         sendAction('add', composite);
     }
 
-    async function sendAction(type, value, oldRaw = null) {
-        document.body.classList.add('loading');
+    async function sendAction(type, value, oldRaw = null, silent = false) {
+        if(!silent) document.body.classList.add('loading');
         try {
             if(type === 'update') {
                 await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(oldRaw)}`, { mode: 'no-cors' });
@@ -90,10 +89,9 @@
             } else {
                 await fetch(`${apiURL}?action=${type}&url=${encodeURIComponent(value)}`, { mode: 'no-cors' });
             }
-            if (type !== 'sync') alert('完了');
-            loadReports();
-        } catch (e) { alert('エラー'); }
-        document.body.classList.remove('loading');
+            if(!silent) { alert('完了'); loadReports(); }
+        } catch (e) { if(!silent) alert('エラー'); }
+        if(!silent) document.body.classList.remove('loading');
     }
 
     async function loadReports() {
@@ -101,8 +99,7 @@
         const data = await res.json();
         currentLinks = data.map((raw, i) => {
             const p = raw.split(SEP);
-            const id = p[2] && p[2] !== '不明' ? p[2] : extractId(p[0] || raw);
-            return { raw: raw, idx: i, url: p[0] || raw, name: p[1] || '', id: id, time: p[3] || '' };
+            return { raw: raw, idx: i, url: p[0] || raw, name: p[1] || '', id: p[2] || extractId(p[0] || raw), time: p[3] || '' };
         }).sort((a, b) => (b.time && a.time) ? b.time.localeCompare(a.time) : b.idx - a.idx);
         renderReports();
     }
@@ -111,7 +108,6 @@
         const q = document.getElementById('searchBar').value.toLowerCase();
         const listDiv = document.getElementById('reportList');
         listDiv.innerHTML = '';
-
         currentLinks.forEach(d => {
             if (!d.name.toLowerCase().includes(q) && !d.id.toLowerCase().includes(q)) return;
             const item = document.createElement('div');
@@ -125,9 +121,9 @@
                     <button class="btn del-btn" onclick="sendAction('delete', '${d.raw.replace(/'/g, "\\'")}')">削除</button>
                 </div>
                 <div id="editBox-${d.idx}" class="edit-mode">
-                    <input type="text" value="${d.name}" id="en-${d.idx}" placeholder="名前">
+                    <input type="text" value="${d.name}" id="en-${d.idx}">
                     <input type="datetime-local" value="${d.time}" id="et-${d.idx}">
-                    <button class="btn save-btn" onclick="saveEdit(${d.idx})">このIDの全データを更新</button>
+                    <button class="btn save-btn" onclick="saveEdit(${d.idx})">一括更新</button>
                 </div>
             `;
             listDiv.appendChild(item);
@@ -139,12 +135,8 @@
         box.style.display = box.style.display === 'block' ? 'none' : 'block';
     }
 
-    // 特定のIDを持つ全てのURLの名前を一括で書き換える関数
     async function syncNamesById(targetId, newName) {
         const targets = currentLinks.filter(l => l.id === targetId && l.name !== newName);
-        if (targets.length === 0) return;
-
-        document.body.classList.add('loading');
         for (const item of targets) {
             const updatedRaw = `${item.url}${SEP}${newName}${SEP}${item.id}${SEP}${item.time}`;
             await fetch(`${apiURL}?action=delete&url=${encodeURIComponent(item.raw)}`, { mode: 'no-cors' });
@@ -156,13 +148,7 @@
         const d = currentLinks.find(l => l.idx === i);
         const n = document.getElementById(`en-${i}`).value;
         const t = document.getElementById(`et-${i}`).value;
-        
-        // 編集時：名前が変更されていたら、同じIDの他データも全て更新
-        if (n !== d.name) {
-            await syncNamesById(d.id, n);
-        }
-        
-        // 今回の編集対象のデータを更新（日時の変更などもあるため）
+        if (n !== d.name) await syncNamesById(d.id, n);
         sendAction('update', `${d.url}${SEP}${n}${SEP}${d.id}${SEP}${t}`, d.raw);
     }
 
